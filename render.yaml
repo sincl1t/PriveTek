@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: privetek
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: HOST
+        value: 0.0.0.0
+      - key: MAIL_PROVIDER
+        value: brevo
+      - key: MAIL_FROM
+        value: privetekmail@gmail.com
+      - key: BREVO_API_KEY
+        sync: false

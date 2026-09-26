@@ -1,0 +1,12 @@
+fastapi==0.128.8
+uvicorn==0.39.0
+python-multipart==0.0.20
+python-dotenv==1.2.1
+email-validator==2.3.0
+pydantic==2.13.5
+fpdf2==2.8.4
+httpx==0.28.1
+trio==0.31.0
+phonenumbers==9.0.40
+holehe==1.61
+ignorant==1.2
