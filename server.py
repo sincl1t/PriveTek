@@ -63,6 +63,9 @@ async def receive(request: Request):
         form = await request.form()
     except Exception:
         raise HTTPException(400, 'Не удалось прочитать форму')
+    # Tilda validates a new webhook with POST test=test (no personal data).
+    if list(form.multi_items()) == [('test', 'test')]:
+        return PlainTextResponse('ok')
     try:
         submission = Submission.model_validate(dict(form))
     except ValidationError as error:
