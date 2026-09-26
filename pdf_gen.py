@@ -35,10 +35,29 @@ def create_report(data, output_dir=None):
         ('email_registrations', 'Регистрации email на сайтах'),
         ('phone_registrations', 'Регистрации телефона на сайтах'),
     ]
+    labels = {'found': 'Найдены сведения', 'not_found': 'Находок в источнике нет',
+              'possible': 'Возможная регистрация', 'unknown': 'Неопределённый результат',
+              'unavailable': 'Проверка недоступна', 'skipped': 'Не проверялось',
+              'disabled': 'Проверка отключена'}
+    kinds = {'email_breach': 'breach', 'email_registrations': 'email', 'phone_registrations': 'phone'}
     for key, title in sections:
         if pdf.will_page_break(25):
             pdf.add_page()
         paragraph(title, 14)
+        if 'checks' in data:
+            entries = [c for c in data['checks'] if c['kind'] == kinds[key]]
+            for check in entries:
+                if pdf.will_page_break(28):
+                    pdf.add_page()
+                paragraph(f"{check['source']}: {labels.get(check['status'], 'Неопределённый результат')}", 11)
+                paragraph(check.get('reason', ''), 10)
+            if not entries:
+                paragraph('Нет сведений о выполнении проверки.')
+            if key == 'email_breach':
+                for breach in data.get(key) or []:
+                    paragraph(f"- {breach.get('name', '?')} ({breach.get('date', 'дата неизвестна')})")
+            pdf.ln(4)
+            continue
         items = data.get(key)
         if items is None:
             paragraph('Проверка не выполнена или недоступна.')
@@ -51,7 +70,7 @@ def create_report(data, output_dir=None):
                 else:
                     paragraph('- ' + str(item.get('site') or item.get('domain') or 'Неизвестный сайт'))
         pdf.ln(5)
-    if data.get('errors'):
+    if data.get('errors') and 'checks' not in data:
         paragraph('Предупреждения', 14)
         for error in data['errors']:
             paragraph('- ' + str(error))
