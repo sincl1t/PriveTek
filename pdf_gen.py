@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 from fpdf import FPDF
+from report_insights import insights
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -30,6 +31,12 @@ def create_report(data, output_dir=None):
     if data.get('demo'):
         paragraph('ДЕМОНСТРАЦИОННЫЙ ОТЧЁТ. Все результаты вымышлены.')
     pdf.ln(5)
+    if 'checks' in data:
+        summary, actions = insights(data)
+        paragraph('Краткий итог', 14)
+        for line in summary:
+            paragraph(line, 10)
+        pdf.ln(4)
     sections = [
         ('email_breach', 'Утечки данных по email'),
         ('email_registrations', 'Регистрации email на сайтах'),
@@ -56,6 +63,10 @@ def create_report(data, output_dir=None):
             if key == 'email_breach':
                 for breach in data.get(key) or []:
                     paragraph(f"- {breach.get('name', '?')} ({breach.get('date', 'дата неизвестна')})")
+                    classes = breach.get('data_classes', [])
+                    if classes:
+                        translations = {'Passwords': 'пароли', 'Email addresses': 'email', 'Phone numbers': 'телефоны', 'Names': 'имена', 'Usernames': 'имена пользователей', 'IP addresses': 'IP-адреса', 'Dates of birth': 'даты рождения'}
+                        paragraph('Данные в утечке: ' + ', '.join(translations.get(c, c) for c in classes), 10)
             pdf.ln(4)
             continue
         items = data.get(key)
@@ -75,6 +86,15 @@ def create_report(data, output_dir=None):
         for error in data['errors']:
             paragraph('- ' + str(error))
         pdf.ln(5)
+    if 'checks' in data:
+        advice_height = 35 + sum(7 * max(1, (len(action) + 89) // 90) for action in actions)
+        if pdf.will_page_break(min(advice_height, 240)):
+            pdf.add_page()
+        paragraph('Что делать дальше', 14)
+        for action in actions:
+            paragraph('- ' + action, 10)
+        pdf.ln(4)
+        paragraph('Источник утечек: Have I Been Pwned (https://haveibeenpwned.com/). База не охватывает все возможные утечки.', 9)
     paragraph('Отчёт охватывает только подключённые источники. Ошибки и ограничения источников могут влиять на полноту результатов.', 10)
     pdf.output(str(pdf_path))
     return str(pdf_path)

@@ -1,5 +1,5 @@
 """Existing sources only; failures are reported without personal data."""
-import os
+import hibp_client
 from urllib.parse import quote
 import httpx
 import phonenumbers
@@ -51,27 +51,11 @@ def search(email=None, phone=None):
     errors = results['errors']
     checks = results['checks']
     if email:
-        key = os.getenv('HIBP_API_KEY')
-        if not key:
-            errors.append('HIBP (email): не настроен ключ API.')
-            checks.append(dict(source='HIBP', kind='breach', status='skipped', reason='Не настроен ключ API.'))
-        else:
-            try:
-                response = httpx.get(
-                    'https://haveibeenpwned.com/api/v3/breachedaccount/' + quote(email, safe=''),
-                    headers={'hibp-api-key': key, 'user-agent': 'PriveTek/0.1'},
-                    params={'truncateResponse': 'false'}, timeout=20)
-                if response.status_code == 404:
-                    results['email_breach'] = []
-                else:
-                    response.raise_for_status()
-                    results['email_breach'] = [
-                        {'name': b['Name'], 'date': b.get('BreachDate', 'дата неизвестна')}
-                        for b in response.json()]
-                checks.append(dict(source='HIBP', kind='breach', status='found' if results['email_breach'] else 'not_found', reason='Получен ответ API HIBP.'))
-            except Exception:
-                checks.append(dict(source='HIBP', kind='breach', status='unavailable', reason='Не удалось получить результат API.'))
-                errors.append('HIBP: проверка недоступна. Проверьте ключ, лимиты и соединение.')
+        breaches, check = hibp_client.lookup(email)
+        results['email_breach'] = breaches
+        checks.append(check)
+        if check['status'] in ('unavailable', 'skipped'):
+            errors.append('HIBP (email): ' + check['reason'])
         try:
             items = trio.run(run_checks, [('Instagram', instagram), ('Amazon', holehe_amazon)], (email,))
             results['email_registrations'] = collect(items, errors, checks, 'email')
