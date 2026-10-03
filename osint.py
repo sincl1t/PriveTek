@@ -1,12 +1,9 @@
 """Existing sources only; failures are reported without personal data."""
 import hibp_client
-from urllib.parse import quote
 import httpx
 import phonenumbers
 import trio
-from holehe.modules.social_media.instagram import instagram
-from holehe.modules.shopping.amazon import amazon as holehe_amazon
-from ignorant.modules.shopping.amazon import amazon as ignorant_amazon
+from source_checks import instagram, amazon_email as holehe_amazon, amazon_phone as ignorant_amazon
 
 
 async def run_checks(checks, arguments):
@@ -32,7 +29,7 @@ def collect(items, errors, checks=None, kind="email"):
     for item in items:
         source = str(item.get('name', 'Источник'))
         if item.get('rateLimit') or not isinstance(item.get('exists'), bool):
-            reason = "Источник не дал пригодного ответа; блокировка, лимит или ошибка разбора."
+            reason = item.get("reason", "Источник не дал пригодного ответа; блокировка, лимит или ошибка разбора.")
             errors.append(f"{source} ({kind}): {reason}")
             checks.append(dict(source=source, kind=kind, status="unavailable", reason=reason))
         else:

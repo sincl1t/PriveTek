@@ -10,3 +10,4 @@ trio==0.31.0
 phonenumbers==9.0.40
 holehe==1.61
 ignorant==1.2
+beautifulsoup4==4.15.0

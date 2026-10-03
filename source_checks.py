@@ -1,0 +1,94 @@
+"""Conservative adapters: never interpret transport/parser failures as absence."""
+import re
+from urllib.parse import urljoin, urlparse
+
+import httpx
+from bs4 import BeautifulSoup
+
+
+class Unavailable(Exception):
+    pass
+
+
+def validate(response):
+    if response.status_code != 200:
+        raise Unavailable(f"Источник вернул HTTP {response.status_code}; проверка не выполнена.")
+    soup = BeautifulSoup(response.text, 'html.parser')
+    if soup.select('form[action*="validateCaptcha"], input[name="captcha"], #captchacharacters') or (
+            soup.title and 'robot check' in soup.title.get_text().lower()):
+        raise Unavailable('Источник запросил CAPTCHA; проверка не выполнена.')
+    return soup
+
+
+async def guarded(source, operation, out):
+    try:
+        exists = await operation()
+        out.append(dict(name=source, domain=source.lower()+'.com', exists=exists, rateLimit=False))
+    except Unavailable as exc:
+        out.append(dict(name=source, exists=None, rateLimit=True, reason=str(exc)))
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        out.append(dict(name=source, exists=None, rateLimit=True,
+                        reason='Ошибка соединения или неизвестный формат ответа источника.'))
+
+
+async def amazon_email(email, client, out):
+    async def operation():
+        response = await client.get('https://www.amazon.com/ap/signin', params={
+            'openid.assoc_handle': 'usflex', 'openid.mode': 'checkid_setup',
+            'openid.ns': 'http://specs.openid.net/auth/2.0',
+            'openid.return_to': 'https://www.amazon.com/',
+            'openid.identity': 'http://specs.openid.net/auth/2.0/identifier_select',
+            'openid.claimed_id': 'http://specs.openid.net/auth/2.0/identifier_select'})
+        soup = validate(response)
+        field = soup.select_one('form input[name="email"]')
+        if field is None:
+            raise Unavailable('Не найдена ожидаемая форма входа Amazon.')
+        form = field.find_parent('form')
+        action = urljoin(str(response.url), form.get('action', ''))
+        target = urlparse(action)
+        if (target.scheme != 'https' or target.netloc != 'www.amazon.com'
+                or target.path not in ('/ap/signin', '/ap/signin/')
+                or form.get('method', '').lower() != 'post'):
+            raise Unavailable('Форма входа Amazon изменилась; отправка остановлена.')
+        data = {i['name']: i.get('value', '') for i in form.select('input[name]')
+                if i.get('type', '').lower() == 'hidden'}
+        data['email'] = email
+        soup = validate(await client.post(action, data=data, follow_redirects=False))
+        password = soup.select_one('form input[name="password"][type="password"]')
+        if password is not None:
+            return True
+        raise Unavailable('Amazon не вернул распознаваемый результат; наличие аккаунта неизвестно.')
+    await guarded('Amazon', operation, out)
+
+
+async def amazon_phone(phone, country_code, client, out):
+    await amazon_email(str(country_code)+str(phone), client, out)
+
+
+async def instagram(email, client, out):
+    async def operation():
+        response = await client.get('https://www.instagram.com/accounts/emailsignup/')
+        validate(response)
+        token = next((c.value for c in client.cookies.jar if c.name == 'csrftoken'
+                      and c.domain.lstrip('.') in ('instagram.com', 'www.instagram.com')), None)
+        if not token:
+            match = re.search(r'"csrf_token"\s*:\s*"([A-Za-z0-9_-]+)"', response.text)
+            token = match.group(1) if match else None
+        if not token:
+            raise Unavailable('Instagram не предоставил CSRF-токен; проверка недоступна.')
+        response = await client.post(
+            'https://www.instagram.com/api/v1/web/accounts/web_create_ajax/attempt/',
+            data={'email': email, 'username': '', 'first_name': '', 'opt_into_one_tap': 'false'},
+            follow_redirects=False,
+            headers={'x-csrftoken': token, 'Origin': 'https://www.instagram.com',
+                     'Referer': 'https://www.instagram.com/accounts/emailsignup/'})
+        validate(response)
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get('status') != 'ok' or not isinstance(payload.get('errors'), dict):
+            raise Unavailable('Instagram отклонил проверку или изменил формат ответа.')
+        errors = payload['errors'].get('email')
+        if isinstance(errors, list) and any(isinstance(e, dict) and e.get('code') == 'email_is_taken' for e in errors):
+            return True
+        # Missing email error is not evidence of absence; sharing limits are not proof either.
+        raise Unavailable('Instagram не дал однозначного признака регистрации.')
+    await guarded('Instagram', operation, out)
