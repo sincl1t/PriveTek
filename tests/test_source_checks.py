@@ -63,3 +63,55 @@ def test_instagram_cookie_and_schema(payload,expected):
     assert requests[1].url.path=='/api/v1/web/accounts/web_create_ajax/attempt/'
     assert requests[1].headers['x-csrftoken']=='test'
     assert out[0]['exists'] is expected
+
+
+@pytest.mark.parametrize('payload,expected',[
+    ({'status':20},True), ({'status':1},False), ({'status':True},None),
+    ({'status':'20'},None), ({'status':429},None), ({'error':'blocked'},None), ([],None)])
+def test_spotify_validation_only(payload,expected):
+    out,requests=run(sources.spotify,[httpx.Response(200,json=payload)])
+    assert len(requests)==1
+    request=requests[0]
+    assert request.method=='GET'
+    assert request.url.host=='spclient.wg.spotify.com'
+    assert request.url.params['validate']=='1'
+    assert not request.content
+    assert out[0]['exists'] is expected
+    checks=[]
+    osint.collect(out,[],checks)
+    assert checks[0]['status']==('possible' if expected is True else 'unknown' if expected is False else 'unavailable')
+
+
+@pytest.mark.parametrize('code',[301,403,404,429,500])
+def test_spotify_http_errors_never_negative(code):
+    out,requests=run(sources.spotify,[httpx.Response(code,headers={'location':'https://example.invalid/'},json={'status':20})])
+    assert out[0]['exists'] is None
+    assert len(requests)==1
+
+
+def test_spotify_html_is_unavailable():
+    out,requests=run(sources.spotify,[httpx.Response(200,text='<html>CAPTCHA</html>')])
+    assert out[0]['exists'] is None
+
+
+def test_spotify_integrates_with_report(tmp_path,monkeypatch):
+    from pypdf import PdfReader
+    import pdf_gen
+    async def fake(email,client,out):
+        out.append({'name':'Spotify','exists':True,'rateLimit':False,'reason':'Email уже используется.'})
+    monkeypatch.setattr(osint,'spotify',fake)
+    async def unavailable(email,client,out):
+        out.append({'name':'Other','rateLimit':True})
+    monkeypatch.setattr(osint,'instagram',unavailable)
+    monkeypatch.setattr(osint,'holehe_amazon',unavailable)
+    monkeypatch.setattr(osint.hibp_client,'lookup',lambda email:(None,{'source':'HIBP','kind':'breach','status':'skipped','reason':'Нет ключа.'}))
+    result=osint.search('test@example.invalid')
+    assert any(c['source']=='Spotify' and c['status']=='possible' for c in result['checks'])
+    text=''.join(p.extract_text() for p in PdfReader(pdf_gen.create_report(result,tmp_path)).pages)
+    assert 'Spotify' in text
+    assert 'Email уже используется.' in text
+
+
+def test_spotify_skipped_without_email():
+    result=osint.search()
+    assert any(c['source']=='Spotify' and c['status']=='skipped' for c in result['checks'])
