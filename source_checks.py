@@ -92,3 +92,27 @@ async def instagram(email, client, out):
         # Missing email error is not evidence of absence; sharing limits are not proof either.
         raise Unavailable('Instagram не дал однозначного признака регистрации.')
     await guarded('Instagram', operation, out)
+
+
+async def spotify(email, client, out):
+    """Use validation-only GET; never submit Spotify's account creation form."""
+    async def operation():
+        response = await client.get(
+            'https://spclient.wg.spotify.com/signup/public/v1/account',
+            params={'validate': '1', 'email': email}, follow_redirects=False)
+        if response.status_code != 200:
+            raise Unavailable(f"Источник вернул HTTP {response.status_code}; проверка не выполнена.")
+        payload = response.json()
+        if not isinstance(payload, dict) or type(payload.get('status')) is not int:
+            raise Unavailable('Spotify изменил формат ответа; регистрация неизвестна.')
+        if payload['status'] == 20:
+            return True
+        if payload['status'] == 1:
+            return False
+        raise Unavailable('Spotify не дал распознаваемого ответа о доступности email.')
+    await guarded('Spotify', operation, out)
+    if out and out[-1].get('name') == 'Spotify' and not out[-1].get('rateLimit'):
+        out[-1]['reason'] = (
+            'Форма Spotify сообщила, что email уже используется. Возможная регистрация; подтвердите в своём аккаунте.'
+            if out[-1]['exists'] else
+            'Форма Spotify разрешила использовать email. Это не доказывает отсутствие аккаунта или данных в других сервисах.')

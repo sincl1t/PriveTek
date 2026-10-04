@@ -1,9 +1,9 @@
-"""Existing sources only; failures are reported without personal data."""
+"""Selected sources; failures are reported without personal data."""
 import hibp_client
 import httpx
 import phonenumbers
 import trio
-from source_checks import instagram, amazon_email as holehe_amazon, amazon_phone as ignorant_amazon
+from source_checks import instagram, amazon_email as holehe_amazon, amazon_phone as ignorant_amazon, spotify
 
 
 async def run_checks(checks, arguments):
@@ -36,7 +36,7 @@ def collect(items, errors, checks=None, kind="email"):
             completed = True
             checks.append(dict(source=source, kind=kind,
                                status='possible' if item['exists'] else 'unknown',
-                               reason='Косвенный признак регистрации; требует подтверждения.' if item['exists'] else 'Модуль не нашёл признак регистрации. Отсутствие аккаунта не подтверждено.'))
+                               reason=item.get('reason') or ('Косвенный признак регистрации; требует подтверждения.' if item['exists'] else 'Модуль не нашёл признак регистрации. Отсутствие аккаунта не подтверждено.')))
             if item['exists']:
                 found.append({'site': item.get('name'), 'domain': item.get('domain'), 'exists': True})
     return found if completed else None
@@ -54,14 +54,14 @@ def search(email=None, phone=None):
         if check['status'] in ('unavailable', 'skipped'):
             errors.append('HIBP (email): ' + check['reason'])
         try:
-            items = trio.run(run_checks, [('Instagram', instagram), ('Amazon', holehe_amazon)], (email,))
+            items = trio.run(run_checks, [('Instagram', instagram), ('Amazon', holehe_amazon), ('Spotify', spotify)], (email,))
             results['email_registrations'] = collect(items, errors, checks, 'email')
         except Exception:
             errors.append('Проверки email недоступны.')
-            for source in ('Instagram', 'Amazon'):
+            for source in ('Instagram', 'Amazon', 'Spotify'):
                 checks.append(dict(source=source, kind='email', status='unavailable', reason='Ошибка выполнения проверки.'))
     if not email:
-        for source, kind in [('HIBP', 'breach'), ('Instagram', 'email'), ('Amazon', 'email')]:
+        for source, kind in [('HIBP', 'breach'), ('Instagram', 'email'), ('Amazon', 'email'), ('Spotify', 'email')]:
             checks.append(dict(source=source, kind=kind, status='skipped', reason='Email не указан.'))
     if phone:
         checks.append(dict(source='Instagram', kind='phone', status='disabled', reason='Модуль отключён: может принимать ответ об ошибке за найденный аккаунт.'))
