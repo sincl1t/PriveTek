@@ -3,7 +3,8 @@ import hibp_client
 import httpx
 import phonenumbers
 import trio
-from source_checks import instagram, amazon_email as holehe_amazon, amazon_phone as ignorant_amazon, spotify
+from report_data import utc_now, prepare
+from source_checks import instagram, amazon_email as holehe_amazon, amazon_phone as ignorant_amazon, spotify, gravatar
 
 
 async def run_checks(checks, arguments):
@@ -16,9 +17,11 @@ async def run_checks(checks, arguments):
                     await check(*arguments, client, partial)
                 if not partial:
                     raise ValueError('No result')
+                for item in partial:
+                    item['checked_at'] = utc_now()
                 output.extend(partial)
             except Exception:
-                output.append({'name': label, 'rateLimit': True, 'exists': False})
+                output.append({'name': label, 'rateLimit': True, 'exists': False, 'checked_at': utc_now()})
     return output
 
 
@@ -31,10 +34,11 @@ def collect(items, errors, checks=None, kind="email"):
         if item.get('rateLimit') or not isinstance(item.get('exists'), bool):
             reason = item.get("reason", "Источник не дал пригодного ответа; блокировка, лимит или ошибка разбора.")
             errors.append(f"{source} ({kind}): {reason}")
-            checks.append(dict(source=source, kind=kind, status="unavailable", reason=reason))
+            checks.append(dict(source=source, kind=kind, status="unavailable", reason=reason, checked_at=item.get('checked_at')))
         else:
             completed = True
             checks.append(dict(source=source, kind=kind,
+                               checked_at=item.get('checked_at'),
                                status='possible' if item['exists'] else 'unknown',
                                reason=item.get('reason') or ('Косвенный признак регистрации; требует подтверждения.' if item['exists'] else 'Модуль не нашёл признак регистрации. Отсутствие аккаунта не подтверждено.')))
             if item['exists']:
@@ -48,7 +52,18 @@ def search(email=None, phone=None):
     errors = results['errors']
     checks = results['checks']
     if email:
+        try:
+            avatars = trio.run(run_checks, [('Gravatar', gravatar)], (email,))
+            avatar = avatars[0]
+            checks.append(dict(source='Gravatar', kind='avatar',
+                               checked_at=avatar.get('checked_at'),
+                               status=avatar.get('status', 'unavailable'),
+                               reason=avatar.get('reason', 'Проверка Gravatar не выполнена.')))
+        except Exception:
+            checks.append(dict(source='Gravatar', kind='avatar', status='unavailable', reason='Проверка Gravatar не выполнена.'))
         breaches, check = hibp_client.lookup(email)
+        if check['status'] != 'skipped':
+            check['checked_at'] = utc_now()
         results['email_breach'] = breaches
         checks.append(check)
         if check['status'] in ('unavailable', 'skipped'):
@@ -61,7 +76,7 @@ def search(email=None, phone=None):
             for source in ('Instagram', 'Amazon', 'Spotify'):
                 checks.append(dict(source=source, kind='email', status='unavailable', reason='Ошибка выполнения проверки.'))
     if not email:
-        for source, kind in [('HIBP', 'breach'), ('Instagram', 'email'), ('Amazon', 'email'), ('Spotify', 'email')]:
+        for source, kind in [('Gravatar', 'avatar'), ('HIBP', 'breach'), ('Instagram', 'email'), ('Amazon', 'email'), ('Spotify', 'email')]:
             checks.append(dict(source=source, kind=kind, status='skipped', reason='Email не указан.'))
     if phone:
         checks.append(dict(source='Instagram', kind='phone', status='disabled', reason='Модуль отключён: может принимать ответ об ошибке за найденный аккаунт.'))
@@ -77,4 +92,4 @@ def search(email=None, phone=None):
     else:
         for source in ('Instagram', 'Amazon'):
             checks.append(dict(source=source, kind='phone', status='skipped', reason='Телефон не указан.'))
-    return results
+    return prepare(results)

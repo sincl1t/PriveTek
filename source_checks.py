@@ -1,5 +1,6 @@
 """Conservative adapters: never interpret transport/parser failures as absence."""
 import re
+import hashlib
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -8,6 +9,24 @@ from bs4 import BeautifulSoup
 
 class Unavailable(Exception):
     pass
+
+
+async def gravatar(email, client, out):
+    """Public avatar lookup only; 404 does not imply no Gravatar account."""
+    digest = hashlib.sha256(email.strip().lower().encode('utf-8')).hexdigest()
+    check = dict(name='Gravatar', kind='avatar')
+    try:
+        response = await client.head('https://gravatar.com/avatar/' + digest,
+                                     params={'d': '404', 's': '32'}, follow_redirects=False)
+        if response.status_code == 200 and response.headers.get('content-type', '').split(';')[0].lower() in ('image/png', 'image/jpeg', 'image/gif', 'image/webp'):
+            check.update(status='found', reason='Gravatar вернул публичный аватар для хеша email. Это не утечка и не подтверждение личности владельца.')
+        elif response.status_code == 404:
+            check.update(status='not_found', reason='Публичный аватар с рейтингом по умолчанию не найден. Это не доказывает отсутствие аккаунта Gravatar или других данных.')
+        else:
+            check.update(status='unavailable', reason=f'Gravatar вернул неподходящий ответ (HTTP {response.status_code}); проверка не выполнена.')
+    except httpx.HTTPError:
+        check.update(status='unavailable', reason='Не удалось связаться с Gravatar; проверка не выполнена.')
+    out.append(check)
 
 
 def validate(response):

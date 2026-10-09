@@ -4,11 +4,13 @@ from pathlib import Path
 from uuid import uuid4
 from fpdf import FPDF
 from report_insights import insights
+from report_data import prepare, SOURCE_URLS, display_time
 
 BASE_DIR = Path(__file__).resolve().parent
 
 
 def create_report(data, output_dir=None):
+    data = prepare(data)
     directory = Path(output_dir) if output_dir is not None else BASE_DIR / 'reports'
     directory.mkdir(parents=True, exist_ok=True)
     pdf_path = directory / f'report_{uuid4().hex}.pdf'
@@ -36,8 +38,11 @@ def create_report(data, output_dir=None):
         paragraph('Краткий итог', 14)
         for line in summary:
             paragraph(line, 10)
+        if data.get('duplicates_removed'):
+            paragraph(f"Одинаковых записей объединено: {data['duplicates_removed']}. Различающиеся результаты сохранены отдельно.", 9)
         pdf.ln(4)
     sections = [
+        ('public_avatars', 'Публичные аватары по email'),
         ('email_breach', 'Утечки данных по email'),
         ('email_registrations', 'Регистрации email на сайтах'),
         ('phone_registrations', 'Регистрации телефона на сайтах'),
@@ -46,23 +51,38 @@ def create_report(data, output_dir=None):
               'possible': 'Возможная регистрация', 'unknown': 'Неопределённый результат',
               'unavailable': 'Проверка недоступна', 'skipped': 'Не проверялось',
               'disabled': 'Проверка отключена'}
-    kinds = {'email_breach': 'breach', 'email_registrations': 'email', 'phone_registrations': 'phone'}
+    kinds = {'public_avatars': 'avatar', 'email_breach': 'breach', 'email_registrations': 'email', 'phone_registrations': 'phone'}
     for key, title in sections:
         if pdf.will_page_break(25):
             pdf.add_page()
         paragraph(title, 14)
         if 'checks' in data:
             entries = [c for c in data['checks'] if c['kind'] == kinds[key]]
+            order = {'found': 0, 'possible': 1, 'not_found': 2, 'unknown': 3, 'unavailable': 4, 'skipped': 5, 'disabled': 6}
+            entries.sort(key=lambda c: order.get(c.get('status'), 7))
+            previous_group = None
             for check in entries:
-                if pdf.will_page_break(28):
+                group = ('Находки и возможные совпадения' if check['status'] in ('found', 'possible') else
+                         'Проверки без находок' if check['status'] == 'not_found' else 'Ограничения проверки')
+                if pdf.will_page_break(48):
                     pdf.add_page()
+                if group != previous_group:
+                    paragraph(group, 10)
+                    previous_group = group
                 paragraph(f"{check['source']}: {labels.get(check['status'], 'Неопределённый результат')}", 11)
                 paragraph(check.get('reason', ''), 10)
+                if check['source'] in SOURCE_URLS:
+                    paragraph('Источник: ' + SOURCE_URLS[check['source']], 9)
+                if check['status'] not in ('skipped', 'disabled'):
+                    paragraph('Время проверки: ' + display_time(check.get('checked_at')), 9)
             if not entries:
                 paragraph('Нет сведений о выполнении проверки.')
             if key == 'email_breach':
                 for breach in data.get(key) or []:
-                    paragraph(f"- {breach.get('name', '?')} ({breach.get('date', 'дата неизвестна')})")
+                    if pdf.will_page_break(35):
+                        pdf.add_page()
+                    paragraph(f"- {breach.get('name', '?')}")
+                    paragraph('Дата утечки: ' + breach.get('date', 'дата неизвестна') + '. Источник сведений: HIBP.', 9)
                     classes = breach.get('data_classes', [])
                     if classes:
                         translations = {'Passwords': 'пароли', 'Email addresses': 'email', 'Phone numbers': 'телефоны', 'Names': 'имена', 'Usernames': 'имена пользователей', 'IP addresses': 'IP-адреса', 'Dates of birth': 'даты рождения'}

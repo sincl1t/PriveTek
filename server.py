@@ -4,7 +4,6 @@ import os
 import re
 import threading
 from pathlib import Path
-from uuid import uuid4
 
 import phonenumbers
 import uvicorn
@@ -15,11 +14,13 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, fi
 
 import email_sender
 import pdf_gen
+from submission_guard import SubmissionGuard, Limited
 
 load_dotenv(Path(__file__).resolve().parent / '.env')
 logger = logging.getLogger('privetek')
 app = FastAPI()
 slots = threading.BoundedSemaphore(4)
+guard = SubmissionGuard()
 
 
 class Submission(BaseModel):
@@ -59,8 +60,15 @@ async def receive(request: Request):
     content_type = request.headers.get('content-type', '').split(';')[0].lower()
     if content_type not in ('application/x-www-form-urlencoded', 'multipart/form-data'):
         raise HTTPException(415, 'Ожидаются поля формы Name, Email, Phone')
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > 16384:
+            raise HTTPException(413, 'Слишком большая заявка')
+        body.extend(chunk)
+    async def bounded_body():
+        return {'type': 'http.request', 'body': bytes(body), 'more_body': False}
     try:
-        form = await request.form()
+        form = await Request(request.scope, bounded_body).form(max_files=0, max_fields=50)
     except Exception:
         raise HTTPException(400, 'Не удалось прочитать форму')
     # Tilda validates a new webhook with POST test=test (no personal data).
@@ -76,13 +84,21 @@ async def receive(request: Request):
         email_sender.validate_settings()
     except (ValueError, TypeError):
         raise HTTPException(503, 'Отправка почты ещё не настроена')
+    try:
+        job_id, duplicate = guard.reserve(str(submission.Email), submission.Phone)
+    except Limited as limit:
+        raise HTTPException(429, 'Лимит заявок. Повторите позже',
+                            headers={'Retry-After': str(limit.retry_after)})
+    if duplicate:
+        return PlainTextResponse('ok', headers={'X-Request-ID': job_id, 'X-Duplicate': 'true'})
     if not slots.acquire(blocking=False):
+        guard.cancel(job_id)
         raise HTTPException(503, 'Сервер занят. Повторите позже')
-    job_id = uuid4().hex
     try:
         threading.Thread(target=background_task,
                          args=(submission, job_id), daemon=False).start()
     except Exception:
+        guard.cancel(job_id)
         slots.release()
         raise HTTPException(503, 'Не удалось запустить обработку')
     logger.info('job=%s accepted', job_id)
@@ -103,6 +119,7 @@ def background_task(submission, job_id):
         # SMTP exceptions may contain addresses; do not log their message or traceback.
         logger.error('job=%s stage=%s failed=%s', job_id, stage, type(error).__name__)
     finally:
+        guard.finish(job_id)
         slots.release()
 
 
