@@ -104,6 +104,7 @@ def test_spotify_integrates_with_report(tmp_path,monkeypatch):
         out.append({'name':'Other','rateLimit':True})
     monkeypatch.setattr(osint,'instagram',unavailable)
     monkeypatch.setattr(osint,'holehe_amazon',unavailable)
+    monkeypatch.setattr(osint,'gravatar',unavailable)
     monkeypatch.setattr(osint.hibp_client,'lookup',lambda email:(None,{'source':'HIBP','kind':'breach','status':'skipped','reason':'Нет ключа.'}))
     result=osint.search('test@example.invalid')
     assert any(c['source']=='Spotify' and c['status']=='possible' for c in result['checks'])
@@ -115,3 +116,32 @@ def test_spotify_integrates_with_report(tmp_path,monkeypatch):
 def test_spotify_skipped_without_email():
     result=osint.search()
     assert any(c['source']=='Spotify' and c['status']=='skipped' for c in result['checks'])
+
+
+@pytest.mark.parametrize('code,mime,status', [
+    (200, 'image/png', 'found'), (404, 'text/html', 'not_found'),
+    (200, 'text/html', 'unavailable'), (429, 'text/html', 'unavailable'),
+    (302, 'image/png', 'unavailable'), (500, 'image/png', 'unavailable')])
+def test_gravatar_is_only_a_public_avatar_lookup(code, mime, status):
+    import hashlib
+    out, requests = run(sources.gravatar, [httpx.Response(code, headers={'content-type': mime})])
+    assert out[0]['status'] == status
+    assert out[0]['kind'] == 'avatar'
+    assert requests[0].method == 'HEAD'
+    assert requests[0].url.params['d'] == '404'
+    assert requests[0].url.path.endswith(hashlib.sha256(b'test@example.invalid').hexdigest())
+    assert 'test@example.invalid' not in str(requests[0].url)
+
+
+def test_avatar_is_not_reported_as_breach(tmp_path):
+    from report_insights import insights
+    from pypdf import PdfReader
+    import pdf_gen
+    data = {'checks': [{'source': 'Gravatar', 'kind': 'avatar', 'status': 'found',
+                         'reason': 'Публичный аватар; не утечка.'}], 'email_breach': None}
+    summary, actions = insights(data)
+    assert 'Найден публичный аватар' in summary[0]
+    assert not any('замените' in line.lower() for line in actions)
+    text = ''.join(p.extract_text() for p in PdfReader(pdf_gen.create_report(data, tmp_path)).pages)
+    assert 'Публичные аватары по email' in text
+    assert 'Gravatar: Найдены сведения' in text
