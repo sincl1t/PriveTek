@@ -3,6 +3,8 @@ import logging
 import os
 import re
 import threading
+import secrets
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import phonenumbers
@@ -14,11 +16,19 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, fi
 
 import email_sender
 import pdf_gen
+import job_store
 from submission_guard import SubmissionGuard, Limited
+from privacy_logging import configure_logging
 
 load_dotenv(Path(__file__).resolve().parent / '.env')
+configure_logging()
 logger = logging.getLogger('privetek')
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app):
+    job_store.initialize()
+    yield
+
+app = FastAPI(lifespan=lifespan)
 slots = threading.BoundedSemaphore(4)
 guard = SubmissionGuard()
 
@@ -52,6 +62,10 @@ class Submission(BaseModel):
 
 @app.get('/', response_class=PlainTextResponse)
 def health():
+    try:
+        job_store.health()
+    except Exception:
+        raise HTTPException(503, 'Хранилище временно недоступно') from None
     return 'ok'
 
 
@@ -74,6 +88,13 @@ async def receive(request: Request):
     # Tilda validates a new webhook with POST test=test (no personal data).
     if list(form.multi_items()) == [('test', 'test')]:
         return PlainTextResponse('ok')
+    webhook_secret = os.getenv('WEBHOOK_SECRET', '')
+    if not webhook_secret and os.getenv('REQUIRE_WEBHOOK_SECRET', 'false').lower() == 'true':
+        raise HTTPException(503, 'Защита формы ещё не настроена')
+    if webhook_secret:
+        supplied = request.headers.get('x-webhook-secret', '')
+        if not secrets.compare_digest(supplied.encode(), webhook_secret.encode()):
+            raise HTTPException(403, 'Неверный ключ формы')
     try:
         submission = Submission.model_validate(dict(form))
     except ValidationError as error:
@@ -95,6 +116,7 @@ async def receive(request: Request):
         guard.cancel(job_id)
         raise HTTPException(503, 'Сервер занят. Повторите позже')
     try:
+        job_store.record(job_id, 'accepted')
         threading.Thread(target=background_task,
                          args=(submission, job_id), daemon=False).start()
     except Exception:
@@ -107,22 +129,36 @@ async def receive(request: Request):
 
 def background_task(submission, job_id):
     stage = 'search'
+    pdf_path = None
     try:
+        job_store.record(job_id, 'searching')
         import osint
         results = osint.search(email=str(submission.Email), phone=submission.Phone or None)
         stage = 'pdf'
+        job_store.record(job_id, 'generating_report')
         pdf_path = pdf_gen.create_report(results)
         stage = 'mail'
+        job_store.record(job_id, 'sending')
         email_sender.send_report(str(submission.Email), pdf_path)
+        job_store.record(job_id, 'provider_accepted')
         logger.info('job=%s submitted_to_mail_provider', job_id)
     except Exception as error:
+        try:
+            job_store.record(job_id, 'delivery_unknown' if stage == 'mail' else 'failed')
+        except Exception:
+            logger.error('job=%s status_store_failed', job_id)
         # SMTP exceptions may contain addresses; do not log their message or traceback.
         logger.error('job=%s stage=%s failed=%s', job_id, stage, type(error).__name__)
     finally:
+        if pdf_path:
+            try:
+                Path(pdf_path).unlink(missing_ok=True)
+            except OSError:
+                logger.error('job=%s report_cleanup_failed', job_id)
         guard.finish(job_id)
         slots.release()
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
-    uvicorn.run(app, host=os.getenv('HOST', '127.0.0.1'), port=int(os.getenv('PORT', '8000')))
+    uvicorn.run(app, host=os.getenv('HOST', '127.0.0.1'), port=int(os.getenv('PORT', '8000')),
+                access_log=False, log_config=None)
