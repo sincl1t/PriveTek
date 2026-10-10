@@ -54,7 +54,7 @@ def create_report(data, output_dir=None):
               'disabled': 'Проверка отключена'}
     kinds = {'public_avatars': 'avatar', 'email_breach': 'breach', 'email_registrations': 'email', 'phone_registrations': 'phone', 'username_profiles': 'username'}
     for key, title in sections:
-        if pdf.will_page_break(25):
+        if pdf.will_page_break(73):
             pdf.add_page()
         paragraph(title, 14)
         if 'checks' in data:

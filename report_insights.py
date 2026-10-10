@@ -27,7 +27,7 @@ def insights(data):
     summary = [outcome,
                f'Проверок в отчёте: {len(checks)}. С определённым результатом: {completed}.',
                f'Неопределённых: {uncertain}. Недоступных: {unavailable}. Пропущено или отключено: {skipped}.',
-               f'Записей об утечках: {len(breaches)}. Возможных регистраций: {possible}. Публичных аватаров: {avatars}.']
+               f'Записей об утечках: {len(breaches)}. Возможных регистраций: {possible}. Публичных аватаров: {avatars}. Публичных профилей: {profiles}.']
     actions = []
     if found and breaches:
         classes = {v for b in breaches for v in b.get('data_classes', [])}
