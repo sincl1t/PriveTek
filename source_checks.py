@@ -153,7 +153,7 @@ async def spotify(email, client, out):
 async def github_username(username, client, out):
     """Public exact-handle lookup; a profile does not establish its owner's identity."""
     from search_inputs import normalize_username
-    username = normalize_username(username)
+    username = normalize_username(username).lower()
     check = dict(name='GitHub', kind='username')
     try:
         response = await client.get('https://api.github.com/users/' + username,

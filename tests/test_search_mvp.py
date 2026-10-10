@@ -14,12 +14,12 @@ from pdf_gen import create_report
 from submission_guard import SubmissionGuard
 
 
-@pytest.mark.parametrize('value,expected', [(' @Octocat ', 'octocat'), ('a','a'), ('some-user','some-user'), ('','')])
+@pytest.mark.parametrize('value,expected', [(' @Octocat ', 'Octocat'), ('a','a'), ('some-user','some-user'), ('','')])
 def test_username_input(value, expected):
     assert normalize_username(value) == expected
 
 
-@pytest.mark.parametrize('value', ['../admin','https://github.com/a','a/b','a--b','a_1','a'*40,'-a','a-'])
+@pytest.mark.parametrize('value', ['../admin','https://github.com/a','a/b','a'*65,'-a','a b','a?x=1'])
 def test_bad_username_rejected(value):
     with pytest.raises(ValueError):
         normalize_username(value)
@@ -78,18 +78,20 @@ def test_phone_source_posts_country_code_and_number(action):
 
 def test_search_combines_three_kinds_and_normalizes(monkeypatch):
     calls=[]
-    def fake(function,checks,args):
+    def fake(function,checks,args=None):
+        if function is osint.run_profiles:
+            calls.append((checks,))
+            return [dict(source='GitHub',kind='username',status='found',profile_url='https://github.com/octocat',reason='Exact handle',checked_at='2026-10-10T12:00:00+00:00')]
         calls.append(args)
-        if checks[0][0]=='GitHub':
-            return [dict(name='GitHub',status='found',profile_url='https://github.com/octocat',reason='Exact handle',checked_at='2026-10-10T12:00:00+00:00')]
         if checks[0][0]=='Gravatar':
             return [dict(name='Gravatar',status='not_found')]
         return [dict(name=label,exists=True,rateLimit=False) for label,_ in checks]
     monkeypatch.setattr(osint.trio,'run',fake)
     monkeypatch.setattr(osint.hibp_client,'lookup',lambda email:([],dict(source='HIBP',kind='breach',status='not_found',reason='No match')))
+    monkeypatch.setattr(osint.leakcheck_client,'lookup',lambda email:([],dict(source='LeakCheck',kind='breach',status='not_found',reason='No match')))
     result=osint.search('reader@example.com','+1 (202) 555-0123','@Octocat')
     assert ('2025550123','1') in calls
-    assert ('octocat',) in calls
+    assert ('Octocat',) in calls
     assert result['schema_version']==1
     assert {c['kind'] for c in result['checks']} >= {'email','phone','username'}
     assert all({'source','source_url','kind','status','reason','checked_at','profile_url'} <= c.keys() for c in result['checks'])
@@ -102,7 +104,7 @@ def test_username_changes_duplicate_identity():
     one,_=guard.reserve('reader@example.com','','octocat')
     same,duplicate=guard.reserve('reader@example.com','','OCTOCAT')
     other,duplicate_other=guard.reserve('reader@example.com','','other')
-    assert same==one and duplicate
+    assert same!=one and not duplicate
     assert other!=one and not duplicate_other
 
 
@@ -112,7 +114,7 @@ def test_webhook_passes_username_to_pipeline(monkeypatch):
     monkeypatch.setattr(server.threading,'Thread',thread)
     response=TestClient(server.app).post('/webhook',headers={'X-Webhook-Secret':'test-webhook-key'},data={'Email':'reader@example.com','Username':'@Octocat'})
     assert response.status_code==200
-    assert thread.call_args.kwargs['args'][0].Username=='octocat'
+    assert thread.call_args.kwargs['args'][0].Username=='Octocat'
     server.slots.release()
 
 

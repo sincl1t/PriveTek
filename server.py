@@ -40,7 +40,7 @@ class Submission(BaseModel):
     Name: str = Field(default='', max_length=120)
     Email: EmailStr = Field(max_length=254)
     Phone: str = Field(default='', max_length=40)
-    Username: str = Field(default='', max_length=40)
+    Username: str = Field(default='', max_length=65)
 
     @field_validator('Email')
     @classmethod
@@ -67,14 +67,32 @@ def health():
     return 'ok'
 
 
-@app.get('/api/jobs/{job_id}')
-def job_status(job_id: str, request: Request):
+def require_team(request):
     key = os.getenv('STATUS_API_KEY', '')
     if not key:
         raise HTTPException(503, 'Доступ к статусам ещё не настроен')
     supplied = request.headers.get('authorization', '')
     if not secrets.compare_digest(supplied.encode(), ('Bearer ' + key).encode()):
         raise HTTPException(403, 'Доступ запрещён')
+
+
+@app.get('/api/sources')
+def source_registry(request: Request):
+    require_team(request)
+    from source_health import registry
+    return JSONResponse(registry(), headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/api/sources/check')
+def source_check(request: Request):
+    require_team(request)
+    from source_health import verify
+    return JSONResponse(verify(), headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/api/jobs/{job_id}')
+def job_status(job_id: str, request: Request):
+    require_team(request)
     if not re.fullmatch(r'[0-9a-f]{32}', job_id):
         raise HTTPException(404, 'Задание не найдено')
     try:
