@@ -17,3 +17,11 @@ services:
         value: privetekmail@gmail.com
       - key: BREVO_API_KEY
         sync: false
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: STATUS_API_KEY
+        generateValue: true
+      - key: REQUIRE_DATABASE
+        value: "true"

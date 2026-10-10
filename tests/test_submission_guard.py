@@ -59,7 +59,7 @@ def webhook(monkeypatch):
     slots = MagicMock()
     monkeypatch.setattr(server.threading, 'Thread', thread)
     monkeypatch.setattr(server, 'slots', slots)
-    return TestClient(server.app), thread, slots
+    return TestClient(server.app, headers={'X-Webhook-Secret': 'test-webhook-key'}), thread, slots
 
 
 def test_duplicate_webhook_does_not_send_or_acquire_slot(webhook):

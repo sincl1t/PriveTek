@@ -71,7 +71,7 @@ def test_smtp_failure_is_not_success(tmp_path, monkeypatch, smtp_env):
 @pytest.mark.parametrize('data', [{}, {'Email': 'wrong'}, {'Email': 'reader@example.com', 'Phone': 'abc'},
                                   {'Email': 'reader@example.com', 'Phone': '+123'}])
 def test_invalid_submission(data):
-    response = TestClient(server.app).post('/', data=data or {'Name': ''})
+    response = TestClient(server.app, headers={'X-Webhook-Secret': 'test-webhook-key'}).post('/', data=data or {'Name': ''})
     assert response.status_code == 422
 
 
@@ -80,7 +80,7 @@ def test_form_acceptance(monkeypatch, smtp_env):
     monkeypatch.setattr(server.threading, 'Thread', thread)
     # Isolate the acquired slot because this fake thread will not run its finally block.
     monkeypatch.setattr(server, 'slots', MagicMock())
-    response = TestClient(server.app).post('/', data={'Name': 'Тест', 'Email': 'reader@example.com', 'Phone': '+36 20 123 4567'})
+    response = TestClient(server.app, headers={'X-Webhook-Secret': 'test-webhook-key'}).post('/', data={'Name': 'Тест', 'Email': 'reader@example.com', 'Phone': '+36 20 123 4567'})
     assert response.status_code == 200 and response.text == 'ok'
     submission, job = thread.call_args.kwargs['args']
     assert submission.Phone == '+36201234567'
@@ -90,30 +90,32 @@ def test_form_acceptance(monkeypatch, smtp_env):
 
 def test_missing_mail_settings(monkeypatch):
     monkeypatch.delenv('SMTP_HOST', raising=False)
-    assert TestClient(server.app).post('/', data={'Email': 'reader@example.com'}).status_code == 503
+    assert TestClient(server.app, headers={'X-Webhook-Secret': 'test-webhook-key'}).post('/', data={'Email': 'reader@example.com'}).status_code == 503
 
 
 def test_json_rejected():
-    assert TestClient(server.app).post('/', json={'Email': 'reader@example.com'}).status_code == 415
+    assert TestClient(server.app, headers={'X-Webhook-Secret': 'test-webhook-key'}).post('/', json={'Email': 'reader@example.com'}).status_code == 415
 
 
 def test_busy(monkeypatch, smtp_env):
     slots = MagicMock()
     slots.acquire.return_value = False
     monkeypatch.setattr(server, 'slots', slots)
-    assert TestClient(server.app).post('/', data={'Email': 'reader@example.com'}).status_code == 503
+    assert TestClient(server.app, headers={'X-Webhook-Secret': 'test-webhook-key'}).post('/', data={'Email': 'reader@example.com'}).status_code == 503
 
 
 def test_pipeline(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(osint, 'search', lambda **kwargs: SAMPLE)
     create = pdf_gen.create_report
     monkeypatch.setattr(pdf_gen, 'create_report', lambda data: create(data, tmp_path))
-    send = MagicMock()
+    attachments = []
+    send = MagicMock(side_effect=lambda recipient, path: attachments.append(Path(path).read_bytes()))
     monkeypatch.setattr(email_sender, 'send_report', send)
     slots = MagicMock()
     monkeypatch.setattr(server, 'slots', slots)
     server.background_task(server.Submission(Email='reader@example.com'), 'demo-job')
-    assert Path(send.call_args.args[1]).is_file()
+    assert attachments[0].startswith(b'%PDF-')
+    assert not Path(send.call_args.args[1]).exists()
     slots.release.assert_called_once()
     assert 'reader@example.com' not in caplog.text
 
@@ -179,7 +181,7 @@ def test_brevo_failures_do_not_leak_or_retry(tmp_path, monkeypatch, brevo_env, s
 
 def test_brevo_missing_key(monkeypatch, brevo_env):
     monkeypatch.delenv('BREVO_API_KEY')
-    assert TestClient(server.app).post('/', data={'Email': 'reader@example.com'}).status_code == 503
+    assert TestClient(server.app, headers={'X-Webhook-Secret': 'test-webhook-key'}).post('/', data={'Email': 'reader@example.com'}).status_code == 503
 
 
 def test_brevo_timeout(tmp_path, monkeypatch, brevo_env):
