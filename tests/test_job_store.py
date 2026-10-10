@@ -48,3 +48,17 @@ def test_status_and_history_read_from_database(monkeypatch):
     result = job_store.get('a'*32)
     assert result['status'] == 'sending'
     assert result['history'] == [{'status': 'accepted'}]
+
+
+def test_pooled_connection_uses_transaction_local_timeouts(monkeypatch):
+    monkeypatch.setenv('DATABASE_URL', 'postgresql://test-pooler/db')
+    constructor = MagicMock()
+    monkeypatch.setattr(job_store.psycopg, 'connect', constructor)
+    with job_store.connect() as connection:
+        connection.execute('SELECT 1')
+    assert 'options' not in constructor.call_args.kwargs
+    assert constructor.call_args.kwargs['connect_timeout'] == 2
+    db = constructor.return_value.__enter__.return_value
+    assert [c.args[0] for c in db.execute.call_args_list] == [
+        "SET LOCAL statement_timeout = '2s'", "SET LOCAL lock_timeout = '2s'", 'SELECT 1']
+    constructor.return_value.__exit__.assert_called_once_with(None, None, None)

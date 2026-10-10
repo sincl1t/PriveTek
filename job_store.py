@@ -1,6 +1,7 @@
 """PostgreSQL job metadata and history; no recipient or report content."""
 import os
 from pathlib import Path
+from contextlib import contextmanager
 
 import psycopg
 from psycopg.rows import dict_row
@@ -18,12 +19,17 @@ def enabled():
     return False
 
 
+@contextmanager
 def connect():
     if not os.getenv('DATABASE_URL'):
         raise StoreNotConfigured('Database is not configured')
-    return psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=2,
-                           options='-c statement_timeout=2000 -c lock_timeout=2000',
-                           row_factory=dict_row)
+    # Neon/PgBouncer rejects timeout parameters in the startup package.
+    # SET LOCAL keeps them within this transaction and works with pooling.
+    with psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=2,
+                         row_factory=dict_row) as connection:
+        connection.execute("SET LOCAL statement_timeout = '2s'")
+        connection.execute("SET LOCAL lock_timeout = '2s'")
+        yield connection
 
 
 def initialize():
