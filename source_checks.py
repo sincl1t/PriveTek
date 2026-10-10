@@ -66,13 +66,26 @@ async def amazon_email(email, client, out):
         action = urljoin(str(response.url), form.get('action', ''))
         target = urlparse(action)
         if (target.scheme != 'https' or target.netloc != 'www.amazon.com'
-                or target.path not in ('/ap/signin', '/ap/signin/')
+                or target.path not in ('/ap/signin', '/ap/signin/', '/ax/claim')
                 or form.get('method', '').lower() != 'post'):
             raise Unavailable('Форма входа Amazon изменилась; отправка остановлена.')
         data = {i['name']: i.get('value', '') for i in form.select('input[name]')
                 if i.get('type', '').lower() == 'hidden'}
         data['email'] = email
-        soup = validate(await client.post(action, data=data, follow_redirects=False))
+        reply = await client.post(action, data=data, follow_redirects=False)
+        # The current identifier step redirects back to /ax/claim. Only follow
+        # same-origin login pages, and never redirect a POST or bypass CAPTCHA.
+        for _ in range(3):
+            if reply.status_code not in (301, 302, 303):
+                break
+            location = reply.headers.get('location')
+            target_url = urljoin(str(reply.url), location or '')
+            redirect = urlparse(target_url)
+            if (not location or redirect.scheme != 'https' or redirect.netloc != 'www.amazon.com'
+                    or redirect.path not in ('/ap/signin', '/ap/signin/', '/ax/claim')):
+                raise Unavailable('Amazon перенаправил на неподдерживаемую страницу; проверка остановлена.')
+            reply = await client.get(target_url, follow_redirects=False)
+        soup = validate(reply)
         password = soup.select_one('form input[name="password"][type="password"]')
         if password is not None:
             return True
