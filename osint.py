@@ -3,8 +3,9 @@ import hibp_client
 import httpx
 import phonenumbers
 import trio
+from search_inputs import normalize_phone, normalize_username
 from report_data import utc_now, prepare
-from source_checks import instagram, amazon_email as holehe_amazon, amazon_phone as ignorant_amazon, spotify, gravatar
+from source_checks import instagram, amazon_email as holehe_amazon, amazon_phone as ignorant_amazon, spotify, gravatar, github_username
 
 
 async def run_checks(checks, arguments):
@@ -46,9 +47,11 @@ def collect(items, errors, checks=None, kind="email"):
     return found if completed else None
 
 
-def search(email=None, phone=None):
+def search(email=None, phone=None, username=None):
+    phone = normalize_phone(phone)
+    username = normalize_username(username)
     results = {'email_breach': None, 'email_registrations': None,
-               'phone_registrations': None, 'errors': [], 'checks': []}
+               'phone_registrations': None, 'username_profiles': None, 'errors': [], 'checks': []}
     errors = results['errors']
     checks = results['checks']
     if email:
@@ -92,4 +95,17 @@ def search(email=None, phone=None):
     else:
         for source in ('Instagram', 'Amazon'):
             checks.append(dict(source=source, kind='phone', status='skipped', reason='Телефон не указан.'))
+    if username:
+        items = trio.run(run_checks, [('GitHub', github_username)], (username,))
+        for item in items:
+            check = dict(source='GitHub', kind='username', status=item.get('status', 'unavailable'),
+                         reason=item.get('reason', 'Проверка GitHub не выполнена.'),
+                         checked_at=item.get('checked_at'))
+            if item.get('profile_url'):
+                check['profile_url'] = item['profile_url']
+            checks.append(check)
+        results['username_profiles'] = [dict(site='GitHub', profile_url=c['profile_url'])
+                                       for c in checks if c['kind'] == 'username' and c['status'] == 'found']
+    else:
+        checks.append(dict(source='GitHub', kind='username', status='skipped', reason='Username не указан.'))
     return prepare(results)

@@ -46,14 +46,15 @@ def create_report(data, output_dir=None):
         ('email_breach', 'Утечки данных по email'),
         ('email_registrations', 'Регистрации email на сайтах'),
         ('phone_registrations', 'Регистрации телефона на сайтах'),
+        ('username_profiles', 'Публичные профили по username'),
     ]
     labels = {'found': 'Найдены сведения', 'not_found': 'Находок в источнике нет',
               'possible': 'Возможная регистрация', 'unknown': 'Неопределённый результат',
               'unavailable': 'Проверка недоступна', 'skipped': 'Не проверялось',
               'disabled': 'Проверка отключена'}
-    kinds = {'public_avatars': 'avatar', 'email_breach': 'breach', 'email_registrations': 'email', 'phone_registrations': 'phone'}
+    kinds = {'public_avatars': 'avatar', 'email_breach': 'breach', 'email_registrations': 'email', 'phone_registrations': 'phone', 'username_profiles': 'username'}
     for key, title in sections:
-        if pdf.will_page_break(25):
+        if pdf.will_page_break(73):
             pdf.add_page()
         paragraph(title, 14)
         if 'checks' in data:
@@ -71,6 +72,8 @@ def create_report(data, output_dir=None):
                     previous_group = group
                 paragraph(f"{check['source']}: {labels.get(check['status'], 'Неопределённый результат')}", 11)
                 paragraph(check.get('reason', ''), 10)
+                if check.get('profile_url'):
+                    paragraph('Профиль: ' + check['profile_url'], 9)
                 if check['source'] in SOURCE_URLS:
                     paragraph('Источник: ' + SOURCE_URLS[check['source']], 9)
                 if check['status'] not in ('skipped', 'disabled'):

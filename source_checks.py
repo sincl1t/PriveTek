@@ -135,3 +135,31 @@ async def spotify(email, client, out):
             'Форма Spotify сообщила, что email уже используется. Возможная регистрация; подтвердите в своём аккаунте.'
             if out[-1]['exists'] else
             'Форма Spotify разрешила использовать email. Это не доказывает отсутствие аккаунта или данных в других сервисах.')
+
+
+async def github_username(username, client, out):
+    """Public exact-handle lookup; a profile does not establish its owner's identity."""
+    from search_inputs import normalize_username
+    username = normalize_username(username)
+    check = dict(name='GitHub', kind='username')
+    try:
+        response = await client.get('https://api.github.com/users/' + username,
+                                    follow_redirects=False,
+                                    headers={'Accept': 'application/vnd.github+json',
+                                             'X-GitHub-Api-Version': '2022-11-28'})
+        payload = response.json()
+        if (response.status_code == 200 and isinstance(payload, dict)
+                and isinstance(payload.get('login'), str)
+                and payload['login'].lower() == username
+                and type(payload.get('id')) is int
+                and payload.get('type') == 'User'
+                and payload.get('html_url') == 'https://github.com/' + payload['login']):
+            check.update(status='found', profile_url=payload['html_url'],
+                         reason='Найден публичный профиль с точным username. Принадлежность человеку не подтверждена.')
+        elif response.status_code == 404 and isinstance(payload, dict) and payload.get('message') == 'Not Found':
+            check.update(status='not_found', reason='GitHub не нашёл публичный профиль с этим username. Это не исключает данные в других источниках.')
+        else:
+            check.update(status='unavailable', reason=f'GitHub не дал пригодного ответа (HTTP {response.status_code}).')
+    except (httpx.HTTPError, ValueError):
+        check.update(status='unavailable', reason='Ошибка связи или неизвестный формат ответа GitHub.')
+    out.append(check)

@@ -13,10 +13,13 @@ def insights(data):
     possible = count({'possible'})
     breaches = data.get('email_breach') or []
     avatars = sum(c.get('kind') == 'avatar' and c.get('status') == 'found' for c in checks)
+    profiles = sum(c.get('kind') == 'username' and c.get('status') == 'found' for c in checks)
     if not completed:
         outcome = 'Оценить цифровой след не удалось: нет проверок с определённым результатом.'
     elif breaches:
         outcome = 'В базе утечек получены совпадения. Проверьте указанные сервисы и защиту аккаунтов.'
+    elif profiles:
+        outcome = 'Найден публичный профиль по username. Совпадение имени не подтверждает личность владельца.'
     elif avatars:
         outcome = 'Найден публичный аватар. Это открытая информация, а не свидетельство утечки. Проверки регистраций и утечек смотрите отдельно.'
     else:
@@ -24,7 +27,7 @@ def insights(data):
     summary = [outcome,
                f'Проверок в отчёте: {len(checks)}. С определённым результатом: {completed}.',
                f'Неопределённых: {uncertain}. Недоступных: {unavailable}. Пропущено или отключено: {skipped}.',
-               f'Записей об утечках: {len(breaches)}. Возможных регистраций: {possible}. Публичных аватаров: {avatars}.']
+               f'Записей об утечках: {len(breaches)}. Возможных регистраций: {possible}. Публичных аватаров: {avatars}. Публичных профилей: {profiles}.']
     actions = []
     if found and breaches:
         classes = {v for b in breaches for v in b.get('data_classes', [])}
@@ -34,6 +37,8 @@ def insights(data):
             actions.append('Откройте затронутые сервисы напрямую и проверьте уведомления о безопасности. Состав утечки приведён в разделе об утечках; утечка пароля не предполагается автоматически.')
         actions.append('Включите двухфакторную защиту в затронутых аккаунтах и проверьте активные сеансы.')
         actions.append('Остерегайтесь писем, использующих сведения из утечки: открывайте сервисы напрямую, а не по ссылкам из неожиданных сообщений.')
+    if profiles:
+        actions.append('Проверьте ссылки на найденные профили: одинаковый username может принадлежать разным людям.')
     if possible:
         actions.append('Возможные регистрации проверьте самостоятельно в своих аккаунтах. Косвенный признак не подтверждает владельца.')
     if avatars:
