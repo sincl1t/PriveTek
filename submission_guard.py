@@ -38,7 +38,7 @@ class SubmissionGuard:
 
     def reserve(self, email, phone, username=""):
         recipient = self.digest(email.casefold())
-        key = self.digest(email.casefold()+'\0'+phone+'\0'+username.casefold())
+        key = self.digest(email.casefold()+'\0'+phone+'\0'+username)
         with self.lock:
             now = self.clock()
             while self.accepted and self.accepted[0][0] <= now-self.window:

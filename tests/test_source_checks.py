@@ -106,6 +106,7 @@ def test_spotify_integrates_with_report(tmp_path,monkeypatch):
     monkeypatch.setattr(osint,'holehe_amazon',unavailable)
     monkeypatch.setattr(osint,'gravatar',unavailable)
     monkeypatch.setattr(osint.hibp_client,'lookup',lambda email:(None,{'source':'HIBP','kind':'breach','status':'skipped','reason':'Нет ключа.'}))
+    monkeypatch.setattr(osint.leakcheck_client,'lookup',lambda email:(None,{'source':'LeakCheck','kind':'breach','status':'unavailable','reason':'Offline test.'}))
     result=osint.search('test@example.invalid')
     assert any(c['source']=='Spotify' and c['status']=='possible' for c in result['checks'])
     text=''.join(p.extract_text() for p in PdfReader(pdf_gen.create_report(result,tmp_path)).pages)

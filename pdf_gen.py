@@ -85,11 +85,11 @@ def create_report(data, output_dir=None):
                     if pdf.will_page_break(35):
                         pdf.add_page()
                     paragraph(f"- {breach.get('name', '?')}")
-                    paragraph('Дата утечки: ' + breach.get('date', 'дата неизвестна') + '. Источник сведений: HIBP.', 9)
+                    paragraph('Дата утечки: ' + breach.get('date', 'дата неизвестна') + '. Источник сведений: ' + breach.get('source', 'HIBP') + '.', 9)
                     classes = breach.get('data_classes', [])
                     if classes:
-                        translations = {'Passwords': 'пароли', 'Email addresses': 'email', 'Phone numbers': 'телефоны', 'Names': 'имена', 'Usernames': 'имена пользователей', 'IP addresses': 'IP-адреса', 'Dates of birth': 'даты рождения'}
-                        paragraph('Данные в утечке: ' + ', '.join(translations.get(c, c) for c in classes), 10)
+                        translations = {'Passwords': 'пароли', 'Email addresses': 'email', 'Phone numbers': 'телефоны', 'Names': 'имена', 'Usernames': 'имена пользователей', 'IP addresses': 'IP-адреса', 'Dates of birth': 'даты рождения', 'password': 'пароли', 'email': 'email', 'username': 'имена пользователей', 'phone': 'телефоны', 'first_name': 'имена', 'last_name': 'фамилии', 'address': 'адреса', 'ip': 'IP-адреса'}
+                        paragraph(('Категории во всех совпавших утечках: ' if breach.get('classes_scope') else 'Данные в утечке: ') + ', '.join(translations.get(c, c) for c in classes), 10)
             pdf.ln(4)
             continue
         items = data.get(key)
@@ -117,7 +117,7 @@ def create_report(data, output_dir=None):
         for action in actions:
             paragraph('- ' + action, 10)
         pdf.ln(4)
-        paragraph('Источник утечек: Have I Been Pwned (https://haveibeenpwned.com/). База не охватывает все возможные утечки.', 9)
+        paragraph('Источники утечек: Have I Been Pwned (https://haveibeenpwned.com/), Powered by LeakCheck (https://leakcheck.io/). Полнота баз не гарантируется.', 9)
     paragraph('Отчёт охватывает только подключённые источники. Ошибки и ограничения источников могут влиять на полноту результатов.', 10)
     pdf.output(str(pdf_path))
     return str(pdf_path)

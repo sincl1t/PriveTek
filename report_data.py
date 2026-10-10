@@ -31,6 +31,9 @@ def unique_records(rows):
 
 
 def prepare(data):
+    from public_sources import SOURCES
+    SOURCE_URLS.update({row[0]: row[1] for row in SOURCES})
+    SOURCE_URLS['LeakCheck'] = 'https://leakcheck.io/'
     result = deepcopy(data)
     removed = 0
     for key in ('checks', 'email_breach'):

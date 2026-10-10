@@ -22,7 +22,6 @@ def normalize_username(value):
     value = (value or '').strip().removeprefix('@')
     if not value:
         return ''
-    # MVP checks GitHub handles; never accept URLs or arbitrary request paths.
-    if not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?', value) or '--' in value:
-        raise ValueError('Username: 1–39 латинских букв, цифр или одиночных дефисов')
-    return value.lower()
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', value):
+        raise ValueError('Username: 1–64 латинских букв, цифр, точек, дефисов или подчёркиваний; без URL')
+    return value

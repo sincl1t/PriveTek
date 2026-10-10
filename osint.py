@@ -1,5 +1,7 @@
 """Selected sources; failures are reported without personal data."""
 import hibp_client
+import leakcheck_client
+from public_sources import SOURCES, run_profiles
 import httpx
 import phonenumbers
 import trio
@@ -67,8 +69,14 @@ def search(email=None, phone=None, username=None):
         breaches, check = hibp_client.lookup(email)
         if check['status'] != 'skipped':
             check['checked_at'] = utc_now()
-        results['email_breach'] = breaches
+        results['email_breach'] = [dict(row, source='HIBP') for row in breaches] if breaches is not None else None
         checks.append(check)
+        leak_breaches, leak_check = leakcheck_client.lookup(email)
+        checks.append(leak_check)
+        if leak_breaches is not None:
+            results['email_breach'] = [dict(row, source='HIBP') for row in (breaches or [])] + leak_breaches
+        if leak_check['status'] == 'unavailable':
+            errors.append('LeakCheck (email): ' + leak_check['reason'])
         if check['status'] in ('unavailable', 'skipped'):
             errors.append('HIBP (email): ' + check['reason'])
         try:
@@ -79,7 +87,7 @@ def search(email=None, phone=None, username=None):
             for source in ('Instagram', 'Amazon', 'Spotify'):
                 checks.append(dict(source=source, kind='email', status='unavailable', reason='Ошибка выполнения проверки.'))
     if not email:
-        for source, kind in [('Gravatar', 'avatar'), ('HIBP', 'breach'), ('Instagram', 'email'), ('Amazon', 'email'), ('Spotify', 'email')]:
+        for source, kind in [('Gravatar', 'avatar'), ('HIBP', 'breach'), ('LeakCheck', 'breach'), ('Instagram', 'email'), ('Amazon', 'email'), ('Spotify', 'email')]:
             checks.append(dict(source=source, kind=kind, status='skipped', reason='Email не указан.'))
     if phone:
         checks.append(dict(source='Instagram', kind='phone', status='disabled', reason='Модуль отключён: может принимать ответ об ошибке за найденный аккаунт.'))
@@ -96,16 +104,11 @@ def search(email=None, phone=None, username=None):
         for source in ('Instagram', 'Amazon'):
             checks.append(dict(source=source, kind='phone', status='skipped', reason='Телефон не указан.'))
     if username:
-        items = trio.run(run_checks, [('GitHub', github_username)], (username,))
-        for item in items:
-            check = dict(source='GitHub', kind='username', status=item.get('status', 'unavailable'),
-                         reason=item.get('reason', 'Проверка GitHub не выполнена.'),
-                         checked_at=item.get('checked_at'))
-            if item.get('profile_url'):
-                check['profile_url'] = item['profile_url']
-            checks.append(check)
-        results['username_profiles'] = [dict(site='GitHub', profile_url=c['profile_url'])
-                                       for c in checks if c['kind'] == 'username' and c['status'] == 'found']
+        profile_checks = trio.run(run_profiles, username)
+        checks.extend(profile_checks)
+        results['username_profiles'] = [dict(site=c['source'], profile_url=c['profile_url'])
+                                       for c in profile_checks if c['status'] == 'found']
     else:
-        checks.append(dict(source='GitHub', kind='username', status='skipped', reason='Username не указан.'))
+        for source in SOURCES:
+            checks.append(dict(source=source[0], kind='username', status='skipped', reason='Username не указан.'))
     return prepare(results)
