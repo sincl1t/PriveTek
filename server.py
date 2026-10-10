@@ -11,7 +11,9 @@ import phonenumbers
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi.encoders import jsonable_encoder
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, field_validator
 
 import email_sender
@@ -25,7 +27,7 @@ configure_logging()
 logger = logging.getLogger('privetek')
 @asynccontextmanager
 async def lifespan(app):
-    job_store.initialize()
+    await run_in_threadpool(job_store.initialize)
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -69,6 +71,26 @@ def health():
     return 'ok'
 
 
+@app.get('/api/jobs/{job_id}')
+def job_status(job_id: str, request: Request):
+    key = os.getenv('STATUS_API_KEY', '')
+    if not key:
+        raise HTTPException(503, 'Доступ к статусам ещё не настроен')
+    supplied = request.headers.get('authorization', '')
+    if not secrets.compare_digest(supplied.encode(), ('Bearer ' + key).encode()):
+        raise HTTPException(403, 'Доступ запрещён')
+    if not re.fullmatch(r'[0-9a-f]{32}', job_id):
+        raise HTTPException(404, 'Задание не найдено')
+    try:
+        job = job_store.get(job_id)
+    except Exception:
+        raise HTTPException(503, 'Хранилище временно недоступно') from None
+    if job is None:
+        raise HTTPException(404, 'Задание не найдено')
+    return JSONResponse(jsonable_encoder(job), headers={"Cache-Control": "no-store"})
+
+
+@app.post('/webhook', response_class=PlainTextResponse)
 @app.post('/', response_class=PlainTextResponse)
 async def receive(request: Request):
     content_type = request.headers.get('content-type', '').split(';')[0].lower()
@@ -85,16 +107,18 @@ async def receive(request: Request):
         form = await Request(request.scope, bounded_body).form(max_files=0, max_fields=50)
     except Exception:
         raise HTTPException(400, 'Не удалось прочитать форму')
-    # Tilda validates a new webhook with POST test=test (no personal data).
+    webhook_secret = os.getenv('WEBHOOK_SECRET', '')
+    if not webhook_secret:
+        raise HTTPException(503, 'Защита формы ещё не настроена')
+    supplied = request.headers.get('x-webhook-secret')
+    if supplied is None:
+        tokens = request.query_params.getlist('token')
+        supplied = tokens[0] if len(tokens) == 1 else ''
+    if not secrets.compare_digest(supplied.encode(), webhook_secret.encode()):
+        raise HTTPException(403, 'Неверный ключ формы')
+    # Authenticate the Tilda probe too; it must never start a job or consume quota.
     if list(form.multi_items()) == [('test', 'test')]:
         return PlainTextResponse('ok')
-    webhook_secret = os.getenv('WEBHOOK_SECRET', '')
-    if not webhook_secret and os.getenv('REQUIRE_WEBHOOK_SECRET', 'false').lower() == 'true':
-        raise HTTPException(503, 'Защита формы ещё не настроена')
-    if webhook_secret:
-        supplied = request.headers.get('x-webhook-secret', '')
-        if not secrets.compare_digest(supplied.encode(), webhook_secret.encode()):
-            raise HTTPException(403, 'Неверный ключ формы')
     try:
         submission = Submission.model_validate(dict(form))
     except ValidationError as error:
@@ -115,14 +139,22 @@ async def receive(request: Request):
     if not slots.acquire(blocking=False):
         guard.cancel(job_id)
         raise HTTPException(503, 'Сервер занят. Повторите позже')
+    accepted = False
     try:
-        job_store.record(job_id, 'accepted')
+        await run_in_threadpool(job_store.record, job_id, 'accepted')
+        accepted = True
         threading.Thread(target=background_task,
                          args=(submission, job_id), daemon=False).start()
-    except Exception:
+    except Exception as error:
+        if accepted:
+            try:
+                await run_in_threadpool(job_store.record, job_id, 'failed')
+            except Exception:
+                logger.error('job=%s status_store_failed', job_id)
         guard.cancel(job_id)
         slots.release()
-        raise HTTPException(503, 'Не удалось запустить обработку')
+        logger.error('job=%s stage=start failed=%s', job_id, type(error).__name__)
+        raise HTTPException(503, 'Не удалось запустить обработку') from None
     logger.info('job=%s accepted', job_id)
     return PlainTextResponse('ok', headers={'X-Request-ID': job_id})
 
