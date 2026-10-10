@@ -58,13 +58,14 @@ def test_github_transport_failure():
     trio.run(run)
 
 
-def test_phone_source_posts_country_code_and_number():
+@pytest.mark.parametrize('action', ['/ap/signin', '/ax/claim'])
+def test_phone_source_posts_country_code_and_number(action):
     async def run():
         requests=[]
         def handler(request):
             requests.append(request)
             if request.method == 'GET':
-                return httpx.Response(200,text='<form method="post" action="/ap/signin"><input name="email"><input type="hidden" name="token" value="abc"></form>')
+                return httpx.Response(200,text=f'<form method="post" action="{action}"><input name="email"><input type="hidden" name="token" value="abc"></form>')
             assert b'email=12025550123' in request.content
             return httpx.Response(200,text='<form><input name="password" type="password"></form>')
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -121,3 +122,22 @@ def test_username_report_contains_profile(tmp_path):
     assert 'Публичные профили по username' in text
     assert 'https://github.com/octocat' in text
     assert 'личность не подтверждена' in text
+
+
+@pytest.mark.parametrize('location,expected_requests', [('/ax/claim?step=2',3),('https://example.com/collect',2),('/ap/register',2)])
+def test_amazon_redirect_is_bounded_and_same_origin(location,expected_requests):
+    async def run():
+        requests=[]
+        def handler(request):
+            requests.append(request)
+            if len(requests)==1:
+                return httpx.Response(200,text='<form method="post" action="/ax/claim"><input name="email"></form>')
+            if request.method=='POST':
+                return httpx.Response(302,headers={'Location':location})
+            return httpx.Response(200,text='<form><input name="password" type="password"></form>')
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            out=[]
+            await amazon_phone('2025550123','1',client,out)
+            assert len(requests)==expected_requests
+            assert out[0]['exists'] is (True if expected_requests==3 else None)
+    trio.run(run)
