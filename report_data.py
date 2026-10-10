@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 
 SOURCE_URLS = {
+    'GitHub': 'https://github.com/',
     'HIBP': 'https://haveibeenpwned.com/',
     'Spotify': 'https://www.spotify.com/',
     'Instagram': 'https://www.instagram.com/',
@@ -37,6 +38,13 @@ def prepare(data):
             original = result[key]
             result[key] = unique_records(original)
             removed += len(original) - len(result[key])
+    for check in result.get('checks', []):
+        check.setdefault('source_url', SOURCE_URLS.get(check.get('source'), ''))
+        check.setdefault('checked_at', None)
+        check.setdefault('profile_url', None)
+        check.setdefault('reason', '')
+        check.setdefault('status', 'unknown')
+    result['schema_version'] = 1
     result['duplicates_removed'] = result.get('duplicates_removed', 0) + removed
     return result
 

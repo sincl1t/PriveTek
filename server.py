@@ -7,7 +7,7 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import phonenumbers
+from search_inputs import normalize_phone, normalize_username
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -40,6 +40,7 @@ class Submission(BaseModel):
     Name: str = Field(default='', max_length=120)
     Email: EmailStr = Field(max_length=254)
     Phone: str = Field(default='', max_length=40)
+    Username: str = Field(default='', max_length=40)
 
     @field_validator('Email')
     @classmethod
@@ -49,17 +50,12 @@ class Submission(BaseModel):
     @field_validator('Phone')
     @classmethod
     def validate_phone(cls, value):
-        if not value:
-            return ''
-        if not re.fullmatch(r'\+[0-9\s().-]+', value):
-            raise ValueError('Телефон укажите с кодом страны, например +7 или +36')
-        try:
-            number = phonenumbers.parse(value, None)
-        except phonenumbers.NumberParseException:
-            raise ValueError('Не удалось распознать телефон')
-        if not phonenumbers.is_possible_number(number):
-            raise ValueError('Неверная длина или код страны телефона')
-        return phonenumbers.format_number(number, phonenumbers.PhoneNumberFormat.E164)
+        return normalize_phone(value)
+
+    @field_validator('Username')
+    @classmethod
+    def validate_username(cls, value):
+        return normalize_username(value)
 
 
 @app.get('/', response_class=PlainTextResponse)
@@ -95,7 +91,7 @@ def job_status(job_id: str, request: Request):
 async def receive(request: Request):
     content_type = request.headers.get('content-type', '').split(';')[0].lower()
     if content_type not in ('application/x-www-form-urlencoded', 'multipart/form-data'):
-        raise HTTPException(415, 'Ожидаются поля формы Name, Email, Phone')
+        raise HTTPException(415, 'Ожидаются поля формы Name, Email, Phone, Username')
     body = bytearray()
     async for chunk in request.stream():
         if len(body) + len(chunk) > 16384:
@@ -130,7 +126,7 @@ async def receive(request: Request):
     except (ValueError, TypeError):
         raise HTTPException(503, 'Отправка почты ещё не настроена')
     try:
-        job_id, duplicate = guard.reserve(str(submission.Email), submission.Phone)
+        job_id, duplicate = guard.reserve(str(submission.Email), submission.Phone, submission.Username)
     except Limited as limit:
         raise HTTPException(429, 'Лимит заявок. Повторите позже',
                             headers={'Retry-After': str(limit.retry_after)})
@@ -165,7 +161,8 @@ def background_task(submission, job_id):
     try:
         job_store.record(job_id, 'searching')
         import osint
-        results = osint.search(email=str(submission.Email), phone=submission.Phone or None)
+        results = osint.search(email=str(submission.Email), phone=submission.Phone or None,
+                               username=submission.Username or None)
         stage = 'pdf'
         job_store.record(job_id, 'generating_report')
         pdf_path = pdf_gen.create_report(results)
