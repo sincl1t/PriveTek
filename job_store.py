@@ -52,7 +52,7 @@ def initialize():
                                (migration.name,))
 
 
-def record(job_id, status):
+def record(job_id, status, owner_email=None):
     if not enabled():
         return
     with connect() as connection:
@@ -61,6 +61,11 @@ def record(job_id, status):
             updated_at = CURRENT_TIMESTAMP''', (job_id, status))
         connection.execute('INSERT INTO privetek_job_events (job_id, status) VALUES (%s, %s)',
                            (job_id, status))
+        if owner_email is not None:
+            from account_crypto import email_key
+            connection.execute('''INSERT INTO privetek_job_owners (job_id,email_key)
+                VALUES (%s,%s) ON CONFLICT (job_id) DO NOTHING''',
+                (job_id, email_key(owner_email)))
 
 
 def get(job_id):

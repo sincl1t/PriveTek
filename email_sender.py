@@ -139,3 +139,42 @@ def send_report(to_email: str, pdf_path: str):
     if validate_settings() == 'brevo':
         return send_brevo_report(to_email, pdf_path)
     return send_smtp_report(to_email, pdf_path)
+
+
+def send_account_code(to_email, code, purpose):
+    """Only called for an explicit account action; no automatic retries."""
+    provider = validate_settings()
+    recipient = mailbox(to_email)
+    subject = 'PriveTek: подтверждение email' if purpose == 'register' else 'PriveTek: восстановление пароля'
+    text = (f'Ваш код PriveTek: {code}\n\nКод действует 10 минут и может быть использован один раз. '
+            'Никому его не сообщайте. Если вы не запрашивали код, проигнорируйте письмо.')
+    if provider == 'brevo':
+        settings = BrevoSettings.from_env()
+        try:
+            response = httpx.post('https://api.brevo.com/v3/smtp/email',
+                headers={'api-key': settings.api_key, 'accept': 'application/json'},
+                json={'sender': {'name': 'PriveTek', 'email': settings.sender},
+                      'to': [{'email': recipient}], 'subject': subject, 'textContent': text},
+                timeout=30, follow_redirects=False)
+        except httpx.RequestError:
+            raise DeliveryError('Не удалось подтвердить отправку кода') from None
+        if response.status_code != 201:
+            raise DeliveryError('Почтовый сервис не подтвердил отправку кода')
+        return
+    settings = SMTPSettings.from_env()
+    message = EmailMessage()
+    message['Subject'], message['From'], message['To'] = subject, settings.sender, recipient
+    message['Date'], message['Message-ID'] = formatdate(localtime=False), make_msgid()
+    message.set_content(text)
+    context = ssl.create_default_context()
+    connection = (smtplib.SMTP_SSL(settings.host, settings.port, timeout=30, context=context)
+                  if settings.security == 'ssl' else smtplib.SMTP(settings.host, settings.port, timeout=30))
+    with connection as smtp:
+        smtp.ehlo()
+        if settings.security == 'starttls':
+            smtp.starttls(context=context)
+            smtp.ehlo()
+        smtp.login(settings.username, settings.password)
+        refused = smtp.send_message(message, from_addr=settings.sender, to_addrs=[recipient])
+        if refused:
+            raise DeliveryError('Почтовый сервис отклонил отправку кода')
