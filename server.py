@@ -1,5 +1,6 @@
 """Tilda webhook. Run one worker; background jobs are not a durable queue."""
 import logging
+import asyncio
 import os
 import re
 import threading
@@ -19,6 +20,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, fi
 import email_sender
 import pdf_gen
 import job_store
+import account_crypto
+from account_routes import router as account_router
 from submission_guard import SubmissionGuard, Limited
 from privacy_logging import configure_logging
 
@@ -27,10 +30,49 @@ configure_logging()
 logger = logging.getLogger('privetek')
 @asynccontextmanager
 async def lifespan(app):
+    account_crypto.validate_settings()
     await run_in_threadpool(job_store.initialize)
-    yield
+    cleanup_task = None
+    if account_crypto.enabled():
+        cleanup_task = asyncio.create_task(account_cleanup_loop())
+    try:
+        yield
+    finally:
+        if cleanup_task:
+            cleanup_task.cancel()
+            try:
+                await cleanup_task
+            except asyncio.CancelledError:
+                pass
+
+
+async def account_cleanup_loop():
+    import account_store
+    while True:
+        try:
+            await run_in_threadpool(account_store.cleanup)
+        except Exception as error:
+            logger.error('account_cleanup_failed=%s', type(error).__name__)
+        await asyncio.sleep(3600)
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(account_router)
+
+
+@app.middleware("http")
+async def protect_account_responses(request, call_next):
+    private = request.url.path.startswith("/api/account/") or request.url.path.startswith("/account")
+    try:
+        response = await call_next(request)
+    except Exception:
+        if not private:
+            raise
+        response = JSONResponse({"detail": "Кабинет временно недоступен. Попробуйте позже"}, status_code=503)
+    if private:
+        from account_routes import HEADERS
+        response.headers.update(HEADERS)
+    return response
+
 slots = threading.BoundedSemaphore(4)
 guard = SubmissionGuard()
 
@@ -139,6 +181,10 @@ async def receive(request: Request):
         details = [{'field': '.'.join(map(str, item['loc'])), 'message': item['msg']}
                    for item in error.errors()]
         raise HTTPException(422, details)
+    return await start_submission(submission)
+
+
+async def start_submission(submission):
     try:
         email_sender.validate_settings()
     except (ValueError, TypeError):
@@ -155,7 +201,10 @@ async def receive(request: Request):
         raise HTTPException(503, 'Сервер занят. Повторите позже')
     accepted = False
     try:
-        await run_in_threadpool(job_store.record, job_id, 'accepted')
+        if account_crypto.enabled():
+            await run_in_threadpool(job_store.record, job_id, 'accepted', str(submission.Email))
+        else:
+            await run_in_threadpool(job_store.record, job_id, 'accepted')
         accepted = True
         threading.Thread(target=background_task,
                          args=(submission, job_id), daemon=False).start()
@@ -184,6 +233,12 @@ def background_task(submission, job_id):
         stage = 'pdf'
         job_store.record(job_id, 'generating_report')
         pdf_path = pdf_gen.create_report(results)
+        if account_crypto.enabled():
+            try:
+                import account_store
+                account_store.save_report(job_id, pdf_path)
+            except Exception as error:
+                logger.error('job=%s account_report_failed=%s', job_id, type(error).__name__)
         stage = 'mail'
         job_store.record(job_id, 'sending')
         email_sender.send_report(str(submission.Email), pdf_path)
@@ -204,6 +259,23 @@ def background_task(submission, job_id):
                 logger.error('job=%s report_cleanup_failed', job_id)
         guard.finish(job_id)
         slots.release()
+
+
+@app.post('/api/account/jobs')
+async def account_submit(request: Request):
+    from account_routes import ready, origin, body, identify, result
+    ready()
+    origin(request)
+    data = await body(request)
+    user, _ = await run_in_threadpool(identify, request, True)
+    if data.get('consent') is not True:
+        raise HTTPException(422, 'Подтвердите согласие на проверку своих данных')
+    try:
+        submission = Submission(Email=user['email'], Phone=data.get('phone', ''), Username=data.get('username', ''))
+    except (ValidationError, TypeError):
+        raise HTTPException(422, 'Проверьте формат телефона и username') from None
+    response = await start_submission(submission)
+    return result(dict(job_id=response.headers['X-Request-ID'], duplicate=response.headers.get('X-Duplicate') == 'true'), 202)
 
 
 if __name__ == '__main__':

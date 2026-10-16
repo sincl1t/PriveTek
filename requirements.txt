@@ -12,3 +12,6 @@ holehe==1.61
 ignorant==1.2
 beautifulsoup4==4.15.0
 psycopg[binary]==3.2.10
+
+argon2-cffi==25.1.0
+cryptography==46.0.3
