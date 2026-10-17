@@ -217,7 +217,9 @@ def page():
 
 @router.get('/account/assets/{name}', include_in_schema=False)
 def asset(name: str):
-    allowed = {'account.css': 'text/css', 'account.js': 'application/javascript'}
+    allowed = {'account.css': 'text/css', 'account.js': 'application/javascript',
+               'brand-logo.png': 'image/png', 'brand-background.jpg': 'image/jpeg',
+               'tildasans.woff2': 'font/woff2'}
     if name not in allowed:
         raise HTTPException(404)
     return FileResponse(ASSETS / name, media_type=allowed[name], headers=HEADERS)
