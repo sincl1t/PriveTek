@@ -131,7 +131,7 @@ def test_probe_auth_and_cache(monkeypatch):
     assert client.post('/api/sources/check').status_code==403
     headers={'Authorization':'Bearer team-key'}
     registry=client.get('/api/sources',headers=headers)
-    assert registry.status_code==200 and len(registry.json()['sources'])==17
+    assert registry.status_code==200 and len(registry.json()['sources'])==20
     first=client.post('/api/sources/check',headers=headers)
     second=client.post('/api/sources/check',headers=headers)
     assert first.json()['verified_sources']==2

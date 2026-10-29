@@ -1,4 +1,5 @@
 """Selected sources; failures are reported without personal data."""
+import discovery
 import hibp_client
 import leakcheck_client
 from public_sources import SOURCES, run_profiles
@@ -105,10 +106,11 @@ def search(email=None, phone=None, username=None):
             checks.append(dict(source=source, kind='phone', status='skipped', reason='Телефон не указан.'))
     if username:
         profile_checks = trio.run(run_profiles, username)
+        profile_checks.extend(trio.run(discovery.run, username))
         checks.extend(profile_checks)
         results['username_profiles'] = [dict(site=c['source'], profile_url=c['profile_url'])
                                        for c in profile_checks if c['status'] == 'found']
     else:
-        for source in SOURCES:
+        for source in SOURCES + discovery.SOURCES:
             checks.append(dict(source=source[0], kind='username', status='skipped', reason='Username не указан.'))
     return prepare(results)

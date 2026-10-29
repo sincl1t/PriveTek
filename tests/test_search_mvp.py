@@ -82,6 +82,8 @@ def test_search_combines_three_kinds_and_normalizes(monkeypatch):
         if function is osint.run_profiles:
             calls.append((checks,))
             return [dict(source='GitHub',kind='username',status='found',profile_url='https://github.com/octocat',reason='Exact handle',checked_at='2026-10-10T12:00:00+00:00')]
+        if function is osint.discovery.run:
+            return []
         calls.append(args)
         if checks[0][0]=='Gravatar':
             return [dict(name='Gravatar',status='not_found')]
