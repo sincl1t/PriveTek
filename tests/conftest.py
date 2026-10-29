@@ -6,4 +6,5 @@ from submission_guard import SubmissionGuard
 def fresh_guard(monkeypatch):
     monkeypatch.setattr(server, 'guard', SubmissionGuard())
     monkeypatch.setenv('WEBHOOK_SECRET', 'test-webhook-key')
+    monkeypatch.setenv('AI_SUMMARY_ENABLED', 'false')
     monkeypatch.delenv('DATABASE_URL', raising=False)

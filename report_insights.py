@@ -28,20 +28,23 @@ def insights(data):
                f'Проверок в отчёте: {len(checks)}. С определённым результатом: {completed}.',
                f'Неопределённых: {uncertain}. Недоступных: {unavailable}. Пропущено или отключено: {skipped}.',
                f'Записей об утечках: {len(breaches)}. Возможных регистраций: {possible}. Публичных аватаров: {avatars}. Публичных профилей: {profiles}.']
+    from analysis_layer import analyze
+    active = [item for item in analyze(data)['items'] if item['priority'] != 'excluded']
+    active_categories = {item['category'] for item in active}
     actions = []
-    if found and breaches:
-        classes = {v for b in breaches for v in b.get('data_classes', [])}
-        if 'Passwords' in classes:
+    if found and breaches and 'breach' in active_categories:
+        classes = {v for item in active if item['category']=='breach' for v in item['classes']}
+        if 'password' in classes:
             actions.append('Если пароль в затронутом сервисе не менялся после утечки, замените его. Замените также совпадающие пароли в других аккаунтах.')
         else:
             actions.append('Откройте затронутые сервисы напрямую и проверьте уведомления о безопасности. Состав утечки приведён в разделе об утечках; утечка пароля не предполагается автоматически.')
         actions.append('Включите двухфакторную защиту в затронутых аккаунтах и проверьте активные сеансы.')
         actions.append('Остерегайтесь писем, использующих сведения из утечки: открывайте сервисы напрямую, а не по ссылкам из неожиданных сообщений.')
-    if profiles:
+    if profiles and 'public_profile' in active_categories:
         actions.append('Проверьте ссылки на найденные профили: одинаковый username может принадлежать разным людям.')
-    if possible:
+    if possible and 'registration_signal' in active_categories:
         actions.append('Возможные регистрации проверьте самостоятельно в своих аккаунтах. Косвенный признак не подтверждает владельца.')
-    if avatars:
+    if avatars and 'public_avatar' in active_categories:
         actions.append('Если вы не хотите связывать email с публичным аватаром, проверьте настройки своего Gravatar. PriveTek не удаляет изображения автоматически.')
     if not completed or unavailable or uncertain or skipped:
         actions.append('Недоступные и неопределённые проверки не означают отсутствия данных. Для самостоятельной проверки утечек откройте https://haveibeenpwned.com/ .')

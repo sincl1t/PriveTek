@@ -1,0 +1,288 @@
+[
+  {
+    "name": "record_password",
+    "data": {
+      "checks": [
+        {
+          "source": "HIBP",
+          "kind": "breach",
+          "status": "found"
+        }
+      ],
+      "email_breach": [
+        {
+          "source": "HIBP",
+          "name": "Synthetic service",
+          "date": "2024-01",
+          "data_classes": [
+            "Passwords"
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "high": 1
+    }
+  },
+  {
+    "name": "global_password_not_record",
+    "data": {
+      "checks": [
+        {
+          "source": "LeakCheck",
+          "kind": "breach",
+          "status": "found"
+        }
+      ],
+      "email_breach": [
+        {
+          "source": "LeakCheck",
+          "name": "Synthetic service",
+          "date": "2024-01",
+          "data_classes": [
+            "password"
+          ],
+          "classes_scope": "all_matching_breaches"
+        }
+      ]
+    },
+    "expected": {
+      "review": 1
+    }
+  },
+  {
+    "name": "email_metadata",
+    "data": {
+      "checks": [
+        {
+          "source": "HIBP",
+          "kind": "breach",
+          "status": "found"
+        }
+      ],
+      "email_breach": [
+        {
+          "source": "HIBP",
+          "name": "Synthetic service",
+          "date": "2024-01",
+          "data_classes": [
+            "Email addresses"
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "review": 1
+    }
+  },
+  {
+    "name": "profile_not_identity",
+    "data": {
+      "checks": [
+        {
+          "source": "GitHub",
+          "kind": "username",
+          "status": "found",
+          "profile_url": "https://github.com/example"
+        }
+      ],
+      "email_breach": []
+    },
+    "expected": {
+      "review": 1
+    }
+  },
+  {
+    "name": "avatar_not_breach",
+    "data": {
+      "checks": [
+        {
+          "source": "Gravatar",
+          "kind": "avatar",
+          "status": "found"
+        }
+      ],
+      "email_breach": []
+    },
+    "expected": {
+      "informational": 1
+    }
+  },
+  {
+    "name": "indirect_not_high",
+    "data": {
+      "checks": [
+        {
+          "source": "Spotify",
+          "kind": "email",
+          "status": "possible"
+        }
+      ],
+      "email_breach": []
+    },
+    "expected": {
+      "review": 1
+    }
+  },
+  {
+    "name": "unavailable_not_absence",
+    "data": {
+      "checks": [
+        {
+          "source": "HIBP",
+          "kind": "breach",
+          "status": "unavailable"
+        }
+      ],
+      "email_breach": []
+    },
+    "expected": {}
+  },
+  {
+    "name": "negative_not_safe_claim",
+    "data": {
+      "checks": [
+        {
+          "source": "HIBP",
+          "kind": "breach",
+          "status": "not_found"
+        }
+      ],
+      "email_breach": []
+    },
+    "expected": {}
+  },
+  {
+    "name": "conflicting_password",
+    "data": {
+      "checks": [
+        {
+          "source": "HIBP",
+          "kind": "breach",
+          "status": "found"
+        },
+        {
+          "source": "HIBP",
+          "kind": "breach",
+          "status": "not_found"
+        }
+      ],
+      "email_breach": [
+        {
+          "source": "HIBP",
+          "name": "Synthetic service",
+          "date": "2024-01",
+          "data_classes": [
+            "password"
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "review": 1
+    }
+  },
+  {
+    "name": "unknown_classes_not_password",
+    "data": {
+      "checks": [
+        {
+          "source": "HIBP",
+          "kind": "breach",
+          "status": "found"
+        }
+      ],
+      "email_breach": [
+        {
+          "source": "HIBP",
+          "name": "Synthetic service",
+          "date": "2024-01",
+          "data_classes": [
+            "unknown_secret"
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "review": 1
+    }
+  },
+  {
+    "name": "duplicate_record_one_group",
+    "data": {
+      "checks": [
+        {
+          "source": "HIBP",
+          "kind": "breach",
+          "status": "found"
+        },
+        {
+          "source": "HIBP",
+          "kind": "breach",
+          "status": "found"
+        }
+      ],
+      "email_breach": [
+        {
+          "source": "HIBP",
+          "name": "Synthetic service",
+          "date": "2024-01",
+          "data_classes": [
+            "Passwords"
+          ]
+        },
+        {
+          "source": "HIBP",
+          "name": "Synthetic service",
+          "date": "2024-01",
+          "data_classes": [
+            "password"
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "high": 1
+    }
+  },
+  {
+    "name": "different_providers_not_merged",
+    "data": {
+      "checks": [
+        {
+          "source": "HIBP",
+          "kind": "breach",
+          "status": "found"
+        },
+        {
+          "source": "LeakCheck",
+          "kind": "breach",
+          "status": "found"
+        }
+      ],
+      "email_breach": [
+        {
+          "source": "HIBP",
+          "name": "Synthetic service",
+          "date": "2024-01",
+          "data_classes": [
+            "Passwords"
+          ]
+        },
+        {
+          "source": "LeakCheck",
+          "name": "Synthetic service",
+          "date": "2024-01",
+          "data_classes": [
+            "password"
+          ],
+          "classes_scope": "all_matching_breaches"
+        }
+      ]
+    },
+    "expected": {
+      "high": 1,
+      "review": 1
+    }
+  }
+]
