@@ -116,4 +116,6 @@ def search(email=None, phone=None, username=None):
     output = prepare(results)
     from identity_resolution import build
     output['identity_resolution'] = build(output, email, phone, username)
+    from analysis_layer import analyze
+    output['identity_resolution']['analysis_basis'] = analyze(output)['basis']
     return output

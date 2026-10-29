@@ -125,6 +125,19 @@ def create_report(data, output_dir=None):
         if data.get('duplicates_removed'):
             paragraph(f"Одинаковых записей объединено: {data['duplicates_removed']}. Различающиеся результаты сохранены отдельно.", 9)
         pdf.ln(4)
+    from analysis_layer import analyze, lines as analysis_lines
+    analysis = analyze(data)
+    from ai_summary import display_ids
+    selected_ids = display_ids(data.get('analysis_selection',(data.get('identity_resolution') or {}).get('analysis_selection')), analysis)
+    if analysis['items'] or ('checks' in data and not data.get('identity_only')):
+        if pdf.will_page_break(70):
+            pdf.add_page()
+        section_title('Приоритеты проверки')
+        paragraph(analysis['notice'], 9, MUTED)
+        for line in analysis_lines(analysis, selected_ids=selected_ids):
+            panel([(line, 10, INK, '', 5.3)])
+        paragraph('Модель помогла выбрать пункты для сводки; факты и приоритеты проверены правилами.' if selected_ids else 'Классификация и приоритеты рассчитаны по прозрачным правилам. Генеративная модель не использовалась.', 9, MUTED)
+        pdf.ln(4)
     resolution = data.get('identity_resolution')
     if resolution:
         from identity_resolution import DECISION_LABELS

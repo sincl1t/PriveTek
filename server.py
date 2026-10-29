@@ -233,6 +233,10 @@ def background_task(submission, job_id):
         import osint
         results = osint.search(email=str(submission.Email), phone=submission.Phone or None,
                                username=submission.Username or None)
+        import analysis_layer, ai_summary
+        results['analysis_selection'] = ai_summary.select(analysis_layer.analyze(results))
+        if results.get('identity_resolution'):
+            results['identity_resolution']['analysis_selection'] = results['analysis_selection']
         stage = 'pdf'
         job_store.record(job_id, 'generating_report')
         pdf_path = pdf_gen.create_report(results)
