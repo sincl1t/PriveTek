@@ -49,12 +49,12 @@ $('auth-form').onsubmit = async event => {
   } catch (error) { message('auth-message',error.message,true); }
   finally { authBusy=false; $('auth-submit').disabled=false; }
 };
-function signedOut(notice='') { closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').replaceChildren(); $('check-dialog').close(); switchMode('login',notice); }
+function signedOut(notice='') { clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').replaceChildren(); $('check-dialog').close(); switchMode('login',notice); }
 async function openDashboard() {
   const ticket=++generation; let user;
   try { user = await api('me'); } catch(error) { if(ticket!==generation)return; throw error; }
   if(ticket!==generation)return; loading=false; csrf=user.csrf_token; userEmail=user.email;
-  $('account-email').textContent=userEmail; $('check-email').value=userEmail; $('auth-view').hidden=true; $('dashboard').hidden=false; $('logout').hidden=false; offset=0; await Promise.all([loadJobs(true), loadSecurity()]);
+  $('account-email').textContent=userEmail; $('check-email').value=userEmail; $('auth-view').hidden=true; $('dashboard').hidden=false; $('logout').hidden=false; offset=0; await Promise.all([loadJobs(true), loadSecurity(), loadMonitor()]);
 }
 function textEl(tag, cls, text) { const el=document.createElement(tag); el.className=cls; el.textContent=text; return el; }
 function renderJob(job) {
@@ -188,4 +188,54 @@ async function saveIdentity(itemId,decision) {
 }
 $('identity-close').onclick=closeIdentity;
 $('identity-dialog').addEventListener('cancel',event=>{event.preventDefault();closeIdentity();});
+let monitorBusy=false, monitorSettings=null, monitorHistory=[], monitorOffset=0, monitorAvailable=false;
+const monitorLabels={completed:'Проверка выполнена',partial:'Часть источников недоступна',unavailable:'Проверка недоступна',running:'Проверяем',interrupted:'Проверка прервана',cancelled:'Отменена'};
+const monitorMailLabels={none:'Письмо не требуется',pending:'Уведомление в очереди',sending:'Отправка начата',provider_accepted:'Провайдер принял письмо',delivery_unknown:'Статус отправки не подтверждён',cancelled:'Уведомление отменено'};
+function monitorDate(value){if(!value)return 'ещё нет';const date=new Date(value);return Number.isNaN(date.getTime())?'неизвестно':new Intl.DateTimeFormat('ru-RU',{dateStyle:'short',timeStyle:'short'}).format(date);}
+function clearMonitor(){monitorSettings=null;monitorHistory=[];monitorOffset=0; $('monitor-form').reset();$('monitor-history').replaceChildren();$('monitor-exclusions').replaceChildren();$('monitor-dates').textContent='';}
+function renderMonitor(data){
+  const settings=data.settings;monitorSettings=settings;monitorAvailable=data.available;
+  $('monitor-status').textContent={off:'Выключен',active:'Включён · раз в неделю',paused:'На паузе'}[settings.state]||'Статус неизвестен';
+  $('monitor-username').value=settings.username||'';$('monitor-use-reviews').checked=settings.use_profile_reviews!==false;
+  $('monitor-enable').textContent=settings.state==='off'?'Включить мониторинг':'Сохранить и создать новый исходный снимок';
+  $('monitor-enable').disabled=!data.available;
+  $('monitor-pause').hidden=settings.state!=='active';$('monitor-resume').hidden=settings.state!=='paused';$('monitor-resume').disabled=!data.available;
+  $('monitor-delete').hidden=settings.state==='off';
+  $('monitor-dates').textContent='Последняя проверка: '+monitorDate(settings.last_checked_at)+'. Следующая: '+(settings.state==='active'?monitorDate(settings.next_run_at):'не назначена')+'. Пилот до '+monitorDate(settings.pilot_ends_at)+'.';
+  $('monitor-exclusions').replaceChildren();
+  if(settings.exclusions.length){$('monitor-exclusions').append(textEl('h3','','Исключения из уведомлений'));for(const item of settings.exclusions){const row=textEl('div','monitor-item',item.source+(item.breach_name?' · '+item.breach_name:''));const restore=textEl('button','text-button','Снова учитывать');restore.type='button';restore.onclick=()=>monitorReview(item.id,'restore');row.append(restore);$('monitor-exclusions').append(row);}}
+  $('monitor-history').replaceChildren();
+  if(!data.history.length){$('monitor-history').append(textEl('p','muted',settings.state==='off'?'Мониторинг включается только по вашему согласию.':'История появится после планового запуска.'));return;}
+  $('monitor-history').append(textEl('h3','','История мониторинга'));
+  for(const run of data.history){
+    const row=textEl('article','monitor-run','');row.append(textEl('h4','',monitorDate(run.started_at)+' · '+(monitorLabels[run.state]||'Статус уточняется')));
+    row.append(textEl('p','small','Новых находок для уведомления: '+run.new_count+'. '+(monitorMailLabels[run.mail_state]||'Статус письма уточняется')+'.'));
+    const changes=run.changes;
+    if(changes){
+      if((changes.status_updates||[]).length)row.append(textEl('p','small','Обновлений статуса ранее известных находок: '+changes.status_updates.length+'. Они не считаются новыми находками.'));
+      if(changes.baseline_only||changes.baseline_items.length)row.append(textEl('p','small','Создан исходный снимок для впервые проверенных источников. Эти находки не вызывают письмо.'));
+      if(changes.unavailable.length)row.append(textEl('p','small','Недоступные или неопределённые источники: '+changes.unavailable.join(', ')+'. Предыдущие находки сохранены.'));
+      const items=[...changes.items,...changes.baseline_items];
+      if(items.length){const details=document.createElement('details');details.append(textEl('summary','','Находки и исходный снимок ('+items.length+')'));for(const item of items){
+        const excluded=(settings.included||[]).includes(item.id)?false:settings.exclusions.some(ex=>ex.id===item.id)||item.excluded;
+        const entry=textEl('div','monitor-item',item.source+' · '+({username:'публичный профиль',breach:'сведения об утечке',avatar:'публичный аватар',email:'возможная регистрация'}[item.kind]||'находка')+(item.breach_name?' · '+item.breach_name:''));
+        if(item.profile_url){const link=textEl('a','identity-profile','Открыть профиль ↗');link.href=item.profile_url;link.target='_blank';link.rel='noopener noreferrer';entry.append(link);}
+        const review=textEl('button','text-button',excluded?'Снова учитывать':'Не моё — не уведомлять');review.type='button';review.onclick=()=>monitorReview(item.id,excluded?'restore':'exclude');entry.append(review);details.append(entry);
+      }row.append(details);}
+    }$('monitor-history').append(row);
+  }
+}
+async function loadMonitor(reset=true){const ticket=generation;try{const data=await api('monitor?offset='+(reset?0:monitorOffset));if(ticket!==generation)return;if(reset)monitorHistory=[];monitorHistory.push(...data.history);monitorOffset=monitorHistory.length;$('monitor-load-more').hidden=!data.has_more;renderMonitor({...data,history:monitorHistory});if(!data.available)message('monitor-message','Плановые запуски пока не подключены. Включение будет доступно после настройки.');}catch(error){if(ticket===generation)message('monitor-message',error.message,true);}}
+async function monitorChange(action){
+  if(monitorBusy)return;
+  if(action==='enable'&&!$('monitor-consent').checked){message('monitor-message','Подтвердите согласие на мониторинг.',true);return;}
+  if(action==='delete'&&!confirm('Выключить мониторинг и удалить его настройки, снимки и историю? Это не удалит обычные отчёты.'))return;
+  monitorBusy=true;const ticket=generation;$('monitor-form').querySelectorAll('button').forEach(b=>b.disabled=true);
+  try{await api('monitor',{method:'POST',body:JSON.stringify({action,username:$('monitor-username').value,use_profile_reviews:$('monitor-use-reviews').checked,consent:$('monitor-consent').checked})});if(ticket!==generation)return;$('monitor-consent').checked=false;await loadMonitor();message('monitor-message',action==='delete'?'Мониторинг выключен, его данные удалены.':action==='pause'?'Мониторинг на паузе.':'Настройки сохранены. Ожидаем плановый запуск.');}
+  catch(error){if(ticket===generation){if(error.status===401)signedOut('Сессия завершилась. Войдите снова.');else message('monitor-message',error.message,true);}}
+  finally{monitorBusy=false;$('monitor-form').querySelectorAll('button').forEach(b=>b.disabled=false);$('monitor-enable').disabled=!monitorAvailable;$('monitor-resume').disabled=!monitorAvailable;}
+}
+async function monitorReview(itemId,action){if(monitorBusy)return;monitorBusy=true;const ticket=generation;try{await api('monitor/exclusions',{method:'POST',body:JSON.stringify({item_id:itemId,action})});if(ticket===generation){await loadMonitor();message('monitor-message','Настройка уведомлений сохранена.');}}catch(error){if(ticket===generation)message('monitor-message',error.message,true);}finally{monitorBusy=false;}}
+$('monitor-form').onsubmit=event=>{event.preventDefault();monitorChange('enable');};
+$('monitor-pause').onclick=()=>monitorChange('pause');$('monitor-resume').onclick=()=>monitorChange('resume');$('monitor-delete').onclick=()=>monitorChange('delete');$('monitor-refresh').onclick=()=>loadMonitor();$('monitor-load-more').onclick=()=>loadMonitor(false);
 openDashboard().catch(error=>{signedOut(); if(error.status!==401)message('auth-message',error.message,true);});

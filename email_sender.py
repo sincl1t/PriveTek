@@ -178,3 +178,39 @@ def send_account_code(to_email, code, purpose):
         refused = smtp.send_message(message, from_addr=settings.sender, to_addrs=[recipient])
         if refused:
             raise DeliveryError('Почтовый сервис отклонил отправку кода')
+
+
+def send_monitor_notice(to_email):
+    """Opt-in monitor notice only. No findings or identifiers in the message; no retries."""
+    provider=validate_settings();recipient=mailbox(to_email)
+    origin=os.getenv('ACCOUNT_ORIGIN','https://privetek.onrender.com')
+    subject='PriveTek: мониторинг обнаружил новые сведения'
+    text=('Мониторинг впервые обнаружил сведения, которых не было в предыдущих наблюдениях. '
+          'Это не означает, что аккаунт или утечка возникли только что.\n\n'
+          'Подробности доступны после входа в личный кабинет: '+origin+'/account\n\n'
+          'Вы получаете письмо, потому что включили мониторинг. Поставить его на паузу '
+          'или отключить можно в разделе «Мониторинг» личного кабинета.')
+    if provider=='brevo':
+        settings=BrevoSettings.from_env()
+        try:
+            response=httpx.post('https://api.brevo.com/v3/smtp/email',
+                headers={'api-key':settings.api_key,'accept':'application/json'},
+                json={'sender':{'name':'PriveTek','email':settings.sender},'to':[{'email':recipient}],
+                      'subject':subject,'textContent':text},timeout=30,follow_redirects=False)
+        except httpx.RequestError:
+            raise DeliveryError('Статус уведомления не подтверждён') from None
+        if response.status_code!=201:raise DeliveryError('Провайдер не подтвердил уведомление')
+        try:
+            if not isinstance(response.json()['messageId'],str) or not response.json()['messageId']:raise ValueError()
+        except (ValueError,KeyError,TypeError):raise DeliveryError('Статус уведомления не подтверждён') from None
+        return
+    settings=SMTPSettings.from_env();message=EmailMessage()
+    message['Subject'],message['From'],message['To']=subject,settings.sender,recipient
+    message['Date'],message['Message-ID']=formatdate(localtime=False),make_msgid();message.set_content(text)
+    context=ssl.create_default_context()
+    connection=(smtplib.SMTP_SSL(settings.host,settings.port,timeout=30,context=context) if settings.security=='ssl' else smtplib.SMTP(settings.host,settings.port,timeout=30))
+    with connection as smtp:
+        smtp.ehlo()
+        if settings.security=='starttls':smtp.starttls(context=context);smtp.ehlo()
+        smtp.login(settings.username,settings.password)
+        if smtp.send_message(message,from_addr=settings.sender,to_addrs=[recipient]):raise DeliveryError('Статус уведомления не подтверждён')

@@ -44,12 +44,12 @@ def initialize():
         for migration in sorted((Path(__file__).parent / 'migrations').glob('*.sql')):
             existing = connection.execute(
                 'SELECT version FROM privetek_schema_migrations WHERE version = %s',
-                (migration.name,)).fetchone()
+                (migration.name,), prepare=False).fetchone()
             if existing:
                 continue
             connection.execute(migration.read_text(encoding='utf-8'))
             connection.execute('INSERT INTO privetek_schema_migrations (version) VALUES (%s)',
-                               (migration.name,))
+                               (migration.name,), prepare=False)
 
 
 def record(job_id, status, owner_email=None):
