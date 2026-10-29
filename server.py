@@ -239,7 +239,7 @@ def background_task(submission, job_id):
         if account_crypto.enabled():
             try:
                 import account_store
-                account_store.save_report(job_id, pdf_path)
+                account_store.save_report(job_id, pdf_path, results.get('identity_resolution'))
             except Exception as error:
                 logger.error('job=%s account_report_failed=%s', job_id, type(error).__name__)
         stage = 'mail'

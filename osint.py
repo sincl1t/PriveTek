@@ -113,4 +113,7 @@ def search(email=None, phone=None, username=None):
     else:
         for source in SOURCES + discovery.SOURCES:
             checks.append(dict(source=source[0], kind='username', status='skipped', reason='Username не указан.'))
-    return prepare(results)
+    output = prepare(results)
+    from identity_resolution import build
+    output['identity_resolution'] = build(output, email, phone, username)
+    return output

@@ -292,3 +292,69 @@ def asset(name: str):
     if name not in allowed:
         raise HTTPException(404)
     return FileResponse(ASSETS / name, media_type=allowed[name], headers=HEADERS)
+
+
+def identity_job(job_id):
+    if not re.fullmatch(r'[0-9a-f]{32}', job_id):
+        raise HTTPException(404, 'Карточка не найдена')
+
+
+@router.get('/api/account/jobs/{job_id}/identity')
+def identity_read(job_id: str, request: Request):
+    ready()
+    user, _ = identify(request)
+    identity_job(job_id)
+    snapshot = store.identity_snapshot(user['email_key'], job_id)
+    if snapshot is None:
+        raise HTTPException(404, 'Карточка недоступна: старая проверка, истёк срок или отчёт удалён')
+    return result(snapshot)
+
+
+def identity_update(data, request, job_id):
+    user, _ = identify(request, mutation=True)
+    identity_job(job_id)
+    revision, item_id, decision = data.get('revision'), data.get('item_id'), data.get('decision')
+    from identity_resolution import DECISIONS
+    if type(revision) is not int or revision < 1 or not isinstance(item_id, str) or len(item_id) > 64 or not isinstance(decision, str) or decision not in DECISIONS:
+        raise HTTPException(422, 'Неверная отметка или версия карточки')
+    quota(request, user['email'], 'identity-review', 100)
+    try:
+        snapshot = store.identity_decision(user['email_key'], job_id, revision, item_id, decision)
+    except ValueError:
+        raise HTTPException(422, 'Находка не относится к этой карточке') from None
+    except RuntimeError:
+        raise HTTPException(409, 'Карточка изменена в другой вкладке. Откройте её снова') from None
+    if snapshot is None:
+        raise HTTPException(404, 'Карточка не найдена')
+    return result(snapshot)
+
+
+@router.put('/api/account/jobs/{job_id}/identity')
+async def identity_write(job_id: str, request: Request):
+    ready()
+    origin(request)
+    data = await body(request)
+    try:
+        return await run_in_threadpool(identity_update, data, request, job_id)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(503, 'Не удалось сохранить отметку. Попробуйте позже') from None
+
+
+@router.get('/api/account/jobs/{job_id}/identity/report')
+def identity_pdf(job_id: str, request: Request):
+    ready()
+    user, _ = identify(request)
+    identity_job(job_id)
+    snapshot = store.identity_snapshot(user['email_key'], job_id)
+    if snapshot is None:
+        raise HTTPException(404, 'Карточка не найдена')
+    quota(request, user['email'], 'identity-pdf', 10)
+    import tempfile
+    import pdf_gen
+    with tempfile.TemporaryDirectory(prefix='privetek-identity-') as directory:
+        path = pdf_gen.create_report({'identity_resolution': snapshot, 'identity_only': True}, directory)
+        content = Path(path).read_bytes()
+    return Response(content, media_type='application/pdf', headers={**HEADERS,
+        'Content-Disposition': 'attachment; filename="PriveTek-identity.pdf"'})
