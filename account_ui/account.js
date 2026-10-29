@@ -49,7 +49,7 @@ $('auth-form').onsubmit = async event => {
   } catch (error) { message('auth-message',error.message,true); }
   finally { authBusy=false; $('auth-submit').disabled=false; }
 };
-function signedOut(notice='') { clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').replaceChildren(); $('check-dialog').close(); switchMode('login',notice); }
+function signedOut(notice='') { closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').replaceChildren(); $('check-dialog').close(); switchMode('login',notice); }
 async function openDashboard() {
   const ticket=++generation; let user;
   try { user = await api('me'); } catch(error) { if(ticket!==generation)return; throw error; }
@@ -70,6 +70,7 @@ function renderJob(job) {
     const link=textEl('a','button secondary','Скачать PDF ↓'); link.href='/api/account/jobs/'+job.id+'/report'; link.setAttribute('download','PriveTek-report.pdf'); actions.append(link);
     const remove=textEl('button','text-button','Удалить'); remove.type='button'; remove.onclick=async()=>{ if(!confirm('Удалить сохранённую копию отчёта из кабинета? Письмо с отчётом останется у вас.')) return; remove.disabled=true; try {await api('jobs/'+job.id+'/report',{method:'DELETE'}); await loadJobs(true);} catch(error){handleDashboardError(error); remove.disabled=false;} }; actions.append(remove);
   } else actions.append(textEl('span','report-unavailable',pending?'Отчёт готовится':'PDF недоступен'));
+  if(job.identity_available) { const review=textEl('button','button secondary','Связи и принадлежность'); review.type='button'; review.onclick=()=>openIdentity(job.id); actions.append(review); }
   row.append(actions); return row;
 }
 function handleDashboardError(error) { if(error.status===401) signedOut('Сессия завершилась. Войдите снова.'); else message('dashboard-message',error.message,true); }
@@ -144,4 +145,47 @@ $('mfa-confirm-form').onsubmit=event=>{event.preventDefault();changeSecurity('co
 $('mfa-cancel').onclick=()=>clearMfaSecrets();
 $('mfa-codes-saved').onclick=()=>{ $('mfa-codes-text').textContent=''; $('mfa-recovery-codes').hidden=true; };
 window.addEventListener('beforeunload',event=>{if(!$('mfa-recovery-codes').hidden){event.preventDefault();event.returnValue='';}});
+let identityJob='', identitySnapshot=null, identityBusy=false, identityGeneration=0;
+function closeIdentity() {
+  identityGeneration++; identityJob=''; identitySnapshot=null;
+  $('identity-items').replaceChildren(); $('identity-summary').textContent='';
+  $('identity-download').removeAttribute('href'); $('identity-dialog').close();
+}
+function renderIdentity() {
+  const snapshot=identitySnapshot; if(!snapshot)return;
+  $('identity-summary').textContent='Моё: '+snapshot.summary.mine+'. Не моё: '+snapshot.summary.not_mine+'. Не проверено: '+snapshot.summary.unreviewed+'.';
+  $('identity-items').replaceChildren();
+  const labels={}; snapshot.identifiers.forEach(item=>labels[item.id]=item.title);
+  const groupOrder={mine:0,unreviewed:1,not_mine:2}; let lastGroup='';
+  for(const item of [...snapshot.identifiers,...snapshot.findings].sort((a,b)=>groupOrder[a.decision]-groupOrder[b.decision])) {
+    if(item.decision!==lastGroup){$('identity-items').append(textEl('h3','identity-group',{mine:'Моё — отмечено вами',unreviewed:'Требует вашей проверки',not_mine:'Не моё — исключено вами'}[item.decision]));lastGroup=item.decision;}
+    const row=textEl('div','identity-item',''); const label=textEl('label','',item.title);
+    const select=document.createElement('select'); select.id='identity-'+item.id; label.htmlFor=select.id;
+    for(const [value,title] of [['unreviewed','Не уверен / не проверено'],['mine','Моё'],['not_mine','Не моё']]) {const option=document.createElement('option');option.value=value;option.textContent=title;select.append(option);}
+    select.value=item.decision; select.disabled=identityBusy;
+    select.onchange=()=>saveIdentity(item.id,select.value);
+    row.append(label);
+    if(item.identifier_id) row.append(textEl('p','small','Найдено по '+(labels[item.identifier_id]||'идентификатору')+'. '+(item.evidence==='indirect_signal'?'Косвенный признак регистрации.':'Совпадение источника не подтверждает владельца.')));
+    if(item.profile_url) {const link=textEl('a','identity-profile','Открыть профиль ↗');link.href=item.profile_url;link.target='_blank';link.rel='noopener noreferrer';row.append(link);}
+    row.append(select); $('identity-items').append(row);
+  }
+  if(snapshot.omitted) $('identity-items').append(textEl('p','small','Часть находок не включена из-за ограничения размера. Смотрите исходный PDF.'));
+}
+async function openIdentity(jobId) {
+  closeIdentity(); identityJob=jobId; const ticket=identityGeneration;
+  message('identity-message','Загружаем карточку…'); $('identity-dialog').showModal();
+  try {const snapshot=await api('jobs/'+jobId+'/identity');if(ticket!==identityGeneration)return;
+    identitySnapshot=snapshot; $('identity-download').href='/api/account/jobs/'+jobId+'/identity/report';renderIdentity();message('identity-message','');
+  } catch(error) {if(ticket===identityGeneration){if(error.status===401)signedOut('Сессия завершилась. Войдите снова.');else message('identity-message',error.message,true);}}
+}
+async function saveIdentity(itemId,decision) {
+  if(identityBusy||!identitySnapshot)return;identityBusy=true;const ticket=identityGeneration;
+  $('identity-items').querySelectorAll('select').forEach(el=>el.disabled=true);message('identity-message','Сохраняем отметку…');
+  try {const snapshot=await api('jobs/'+identityJob+'/identity',{method:'PUT',body:JSON.stringify({revision:identitySnapshot.revision,item_id:itemId,decision})});
+    if(ticket!==identityGeneration)return;identitySnapshot=snapshot;message('identity-message','Отметка сохранена. Принадлежность указана вами.');
+  } catch(error) {if(ticket===identityGeneration){if(error.status===401)signedOut('Сессия завершилась. Войдите снова.');else message('identity-message',error.message,true);}}
+  finally {identityBusy=false;if(ticket===identityGeneration)renderIdentity();}
+}
+$('identity-close').onclick=closeIdentity;
+$('identity-dialog').addEventListener('cancel',event=>{event.preventDefault();closeIdentity();});
 openDashboard().catch(error=>{signedOut(); if(error.status!==401)message('auth-message',error.message,true);});

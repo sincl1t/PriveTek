@@ -1,5 +1,6 @@
 """Transactional PostgreSQL account store. All tenant reads require a verified owner."""
 import secrets
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -106,7 +107,8 @@ def list_jobs(owner_key, limit=20, offset=0):
     with job_store.connect() as db:
         rows = db.execute('''SELECT j.id,j.status,j.created_at,j.updated_at,
             (r.job_id IS NOT NULL AND r.expires_at > CURRENT_TIMESTAMP) AS report_available,
-            r.expires_at AS report_expires_at
+            r.expires_at AS report_expires_at,
+            (r.identity_ciphertext IS NOT NULL AND r.expires_at > CURRENT_TIMESTAMP) AS identity_available
             FROM privetek_jobs j JOIN privetek_job_owners o ON o.job_id = j.id
             LEFT JOIN privetek_account_reports r ON r.job_id = j.id
             WHERE o.email_key = %s ORDER BY j.created_at DESC,j.id DESC LIMIT %s OFFSET %s''',
@@ -114,7 +116,7 @@ def list_jobs(owner_key, limit=20, offset=0):
         return dict(items=rows[:limit], has_more=len(rows) > limit, offset=offset)
 
 
-def save_report(job_id, pdf_path):
+def save_report(job_id, pdf_path, identity=None):
     path = Path(pdf_path)
     if path.stat().st_size > 5 * 1024 * 1024:
         raise ValueError('Report too large')
@@ -122,10 +124,16 @@ def save_report(job_id, pdf_path):
     if not content.startswith(b'%PDF-') or len(content) > 5 * 1024 * 1024:
         raise ValueError('Report invalid or too large')
     ciphertext = report_cipher().encrypt(content)
+    identity_ciphertext = None
+    if identity is not None:
+        payload = json.dumps(identity, ensure_ascii=False).encode()
+        if len(payload) > 256 * 1024:
+            raise ValueError('Identity snapshot too large')
+        identity_ciphertext = report_cipher().encrypt(payload)
     with job_store.connect() as db:
-        db.execute('''INSERT INTO privetek_account_reports (job_id,ciphertext,expires_at)
-            SELECT %s,%s,%s WHERE EXISTS (SELECT 1 FROM privetek_job_owners WHERE job_id = %s)
-            ON CONFLICT (job_id) DO NOTHING''', (job_id, ciphertext, now() + timedelta(days=30), job_id))
+        db.execute('''INSERT INTO privetek_account_reports (job_id,ciphertext,expires_at,identity_ciphertext,identity_revision)
+            SELECT %s,%s,%s,%s,%s WHERE EXISTS (SELECT 1 FROM privetek_job_owners WHERE job_id = %s)
+            ON CONFLICT (job_id) DO NOTHING''', (job_id, ciphertext, now() + timedelta(days=30), identity_ciphertext, 1 if identity is not None else 0, job_id))
 
 
 def report(owner_key, job_id):
@@ -152,3 +160,29 @@ def cleanup():
         db.execute('DELETE FROM privetek_mfa_setup WHERE expires_at <= CURRENT_TIMESTAMP')
         db.execute('DELETE FROM privetek_mfa_challenges WHERE expires_at <= CURRENT_TIMESTAMP')
         db.execute("DELETE FROM privetek_account_limits WHERE window_start < CURRENT_TIMESTAMP - INTERVAL '2 hours'")
+
+
+def identity_snapshot(owner_key, job_id):
+    with job_store.connect() as db:
+        row = db.execute("""SELECT r.identity_ciphertext FROM privetek_account_reports r
+            JOIN privetek_job_owners o ON o.job_id=r.job_id
+            WHERE r.job_id=%s AND o.email_key=%s AND r.expires_at>CURRENT_TIMESTAMP""", (job_id, owner_key)).fetchone()
+    return json.loads(report_cipher().decrypt(bytes(row['identity_ciphertext']))) if row and row['identity_ciphertext'] else None
+
+
+def identity_decision(owner_key, job_id, revision, item_id, decision):
+    from identity_resolution import decide
+    with job_store.connect() as db:
+        row = db.execute("""SELECT r.identity_ciphertext,r.identity_revision FROM privetek_account_reports r
+            JOIN privetek_job_owners o ON o.job_id=r.job_id
+            WHERE r.job_id=%s AND o.email_key=%s AND r.expires_at>CURRENT_TIMESTAMP FOR UPDATE OF r""", (job_id, owner_key)).fetchone()
+        if not row or not row['identity_ciphertext']:
+            return None
+        if row['identity_revision'] != revision:
+            raise RuntimeError('Identity revision conflict')
+        snapshot = json.loads(report_cipher().decrypt(bytes(row['identity_ciphertext'])))
+        updated = decide(snapshot, item_id, decision)
+        ciphertext = report_cipher().encrypt(json.dumps(updated, ensure_ascii=False).encode())
+        db.execute('UPDATE privetek_account_reports SET identity_ciphertext=%s,identity_revision=%s WHERE job_id=%s',
+                   (ciphertext, updated['revision'], job_id))
+    return updated

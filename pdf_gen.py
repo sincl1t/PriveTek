@@ -117,13 +117,34 @@ def create_report(data, output_dir=None):
     if data.get('demo'):
         paragraph('ДЕМОНСТРАЦИОННЫЙ ОТЧЁТ. Все результаты вымышлены.', 9, MUTED)
     pdf.ln(5)
-    if 'checks' in data:
+    if 'checks' in data and not data.get('identity_only'):
         summary, actions = insights(data)
         section_title('Краткий итог')
         panel([(line, 10, NAVY if index == 0 else INK, '', 5.6)
                for index, line in enumerate(summary)])
         if data.get('duplicates_removed'):
             paragraph(f"Одинаковых записей объединено: {data['duplicates_removed']}. Различающиеся результаты сохранены отдельно.", 9)
+        pdf.ln(4)
+    resolution = data.get('identity_resolution')
+    if resolution:
+        from identity_resolution import DECISION_LABELS
+        section_title('Связи и принадлежность находок')
+        paragraph(resolution['explanation'], 10)
+        paragraph('Автоматически объединённых личностей: 0. Отметки относятся только к этой проверке.', 9, MUTED)
+        for item in resolution['identifiers'] + resolution['findings']:
+            if pdf.will_page_break(55):
+                pdf.add_page()
+            lines = [(item['title'], 11, NAVY, '', 6),
+                     (DECISION_LABELS[item['decision']], 10, INK, '', 5.3)]
+            if item.get('identifier_id'):
+                labels = {node['id']: node['title'] for node in resolution['identifiers']}
+                lines.append(('Основание: результат поиска по ' + labels.get(item['identifier_id'], 'идентификатору') + '. Общий владелец не доказан.', 9, MUTED, '', 5))
+                lines.append(('Косвенный признак.' if item['evidence'] == 'indirect_signal' else 'Совпадение по данным источника; не проверка личности.', 9, MUTED, '', 5))
+            if item.get('profile_url'):
+                lines.append((item['profile_url'], 9, (0, 122, 150), item['profile_url'], 4.8))
+            panel(lines)
+        if resolution.get('omitted'):
+            paragraph('Часть находок не включена в карточку из-за ограничения размера; смотрите полный список проверок.', 9)
         pdf.ln(4)
     sections = [
         ('public_avatars', 'Публичные аватары по email'),
@@ -132,6 +153,8 @@ def create_report(data, output_dir=None):
         ('phone_registrations', 'Регистрации телефона на сайтах'),
         ('username_profiles', 'Публичные профили по username'),
     ]
+    if data.get('identity_only'):
+        sections = []
     labels = {'found': 'Найдены сведения', 'not_found': 'Находок в источнике нет',
               'possible': 'Возможная регистрация', 'unknown': 'Неопределённый результат',
               'unavailable': 'Проверка недоступна', 'skipped': 'Не проверялось',
@@ -199,7 +222,7 @@ def create_report(data, output_dir=None):
         for error in data['errors']:
             paragraph('- ' + str(error))
         pdf.ln(5)
-    if 'checks' in data:
+    if 'checks' in data and not data.get('identity_only'):
         advice_height = 35 + sum(7 * max(1, (len(action) + 89) // 90) for action in actions)
         if pdf.will_page_break(min(advice_height, 240)):
             pdf.add_page()
