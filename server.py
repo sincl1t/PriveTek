@@ -21,6 +21,7 @@ import email_sender
 import pdf_gen
 import job_store
 import account_crypto
+import discovery
 from account_routes import router as account_router
 from submission_guard import SubmissionGuard, Limited
 from privacy_logging import configure_logging
@@ -32,6 +33,8 @@ logger = logging.getLogger('privetek')
 async def lifespan(app):
     account_crypto.validate_settings()
     await run_in_threadpool(job_store.initialize)
+    if os.getenv('RENDER') == 'true':
+        threading.Thread(target=discovery.startup_probe, daemon=True, name='discovery-probe').start()
     cleanup_task = None
     if account_crypto.enabled():
         cleanup_task = asyncio.create_task(account_cleanup_loop())

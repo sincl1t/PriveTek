@@ -4,6 +4,7 @@ import threading
 import time
 import trio
 import leakcheck_client
+import discovery
 from public_sources import SOURCES, run_profiles
 from report_data import utc_now
 
@@ -15,8 +16,8 @@ _cached_at = 0.0
 def registry():
     public = [dict(name=s[0], kind='username', source_url=s[1], docs=s[2],
                    enabled=True, credential_required=False,
-                   limitation='Точный публичный username; личность не подтверждена. Ошибка не означает отсутствие аккаунта.') for s in SOURCES]
-    return dict(sources=public + [
+                   limitation='Точный публичный username; личность не подтверждена. Ошибка не означает отсутствие аккаунта.') for s in SOURCES + discovery.SOURCES]
+    return dict(discovery_probe=discovery.latest_probe(), sources=public + [
         dict(name='LeakCheck', kind='breach', source_url='https://leakcheck.io/', docs='https://docs.leakcheck.io/public-api/lookup', enabled=True, credential_required=False, limitation='Хеш email; только метаданные. Категории общие для всех утечек. 1 запрос/секунду.'),
         dict(name='HIBP', kind='breach', source_url='https://haveibeenpwned.com/', enabled=bool(os.getenv('HIBP_API_KEY')), credential_required=True, limitation='Без платного ключа пропущен; полнота базы не гарантируется.'),
         dict(name='Gravatar', kind='avatar', source_url='https://gravatar.com/', enabled=True, credential_required=False, limitation='Публичный аватар по хешу email, не подтверждает регистрацию на других сайтах.'),
