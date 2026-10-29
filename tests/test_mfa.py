@@ -1,5 +1,6 @@
 """MFA regression tests: session gating, replay, recovery, CSRF and password-reset bypass."""
 import os
+import secrets
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 import pytest
@@ -141,5 +142,5 @@ def test_db_mfa_concurrent_recovery_and_totp_redeemed_once(db,monkeypatch):
         monkeypatch.setattr(mfa,'now',lambda f=future:f)
         clients=[client(),client()];tokens=[challenge(x) for x in clients]
         with ThreadPoolExecutor(max_workers=2) as pool:
-            results=list(pool.map(lambda pair:mfa.finish_login(pair[0],factor,crypto.digest('session',pair[1])),zip(tokens,['a'*43,'b'*43])))
+            results=list(pool.map(lambda pair:mfa.finish_login(pair[0],factor,crypto.digest('session',pair[1])),zip(tokens,[secrets.token_urlsafe(32),secrets.token_urlsafe(32)])))
         assert results.count(True)==1 and results.count(False)==1
