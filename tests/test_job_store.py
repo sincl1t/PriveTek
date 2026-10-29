@@ -19,7 +19,7 @@ def test_migrations_are_versioned_and_skip_applied(monkeypatch):
     job_store.initialize()
     statements = connection.__enter__.return_value.execute.call_args_list
     assert sum('CREATE TABLE IF NOT EXISTS privetek_jobs' in c.args[0] for c in statements) == 1
-    assert sum('INSERT INTO privetek_schema_migrations' in c.args[0] for c in statements) == 3
+    assert sum('INSERT INTO privetek_schema_migrations' in c.args[0] for c in statements) == 4
     connection.__enter__.return_value.execute.reset_mock()
     connection.__enter__.return_value.execute.return_value.fetchone.return_value = {'version': 'already applied'}
     job_store.initialize()

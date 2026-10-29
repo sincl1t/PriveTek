@@ -110,6 +110,15 @@ def identify(request, mutation=False):
     return user, token
 
 
+def session_response(request, token):
+    previous = request.cookies.get(COOKIE)
+    if previous:
+        store.logout(crypto.digest('session', previous))
+    response = result(dict(message='Вы вошли'))
+    response.set_cookie(COOKIE, token, max_age=7 * 86400, secure=True, httponly=True, samesite='strict', path='/')
+    return response
+
+
 def action(data, request, name):
     ready()
     store.cleanup()
@@ -138,14 +147,22 @@ def action(data, request, name):
         if not isinstance(password, str) or not 1 <= len(password) <= 128:
             raise HTTPException(401, 'Неверный email или пароль')
         token = secrets.token_urlsafe(32)
-        if not store.login(email, password, crypto.digest('session', token)):
+        outcome = store.login(email, password, crypto.digest('session', token))
+        if not outcome:
             raise HTTPException(401, 'Неверный email или пароль; email должен быть подтверждён')
-        previous = request.cookies.get(COOKIE)
-        if previous:
-            store.logout(crypto.digest('session', previous))
-        response = result(dict(message='Вы вошли'))
-        response.set_cookie(COOKIE, token, max_age=7 * 86400, secure=True, httponly=True, samesite='strict', path='/')
-        return response
+        if isinstance(outcome, str):
+            return result(dict(mfa_required=True, challenge_id=outcome, expires_in=300))
+        return session_response(request, token)
+    if name == 'mfa-verify':
+        import account_mfa
+        challenge, code = data.get('challenge_id'), data.get('code')
+        if not isinstance(challenge, str) or not re.fullmatch(r'[0-9a-f]{48}', challenge) or not isinstance(code, str) or len(code) > 64:
+            raise HTTPException(422, 'Введите код приложения или резервный код')
+        quota(request, challenge, 'mfa-login', 10)
+        token = secrets.token_urlsafe(32)
+        if not account_mfa.finish_login(challenge, code.strip(), crypto.digest('session', token)):
+            raise HTTPException(400, 'Код неверен, уже использован или вход истёк. Для нового кода дождитесь его смены в приложении')
+        return session_response(request, token)
     if name == 'logout':
         _, token = identify(request, mutation=True)
         store.logout(crypto.digest('session', token))
@@ -173,6 +190,58 @@ def me(request: Request):
     ready()
     user, token = identify(request)
     return result(dict(email=user['email'], csrf_token=crypto.digest('csrf', token)))
+
+
+@router.get('/api/account/security')
+def security_status(request: Request):
+    import account_mfa
+    ready()
+    user, _ = identify(request)
+    return result(account_mfa.status(user['id']))
+
+
+def security_action(data, request, name):
+    import account_mfa
+    ready()
+    user, token = identify(request, mutation=True)
+    quota(request, user['email'], 'mfa-manage', 10)
+    session_hash = crypto.digest('session', token)
+    if name == 'setup':
+        secret = account_mfa.setup(user['id'], data.get('password'), session_hash)
+        if secret is None:
+            raise HTTPException(400, 'Проверьте пароль; 2FA уже может быть включена')
+        import base64
+        import pyotp
+        import qrcode
+        import qrcode.image.svg
+        uri = pyotp.TOTP(secret).provisioning_uri(name=user['email'], issuer_name='PriveTek')
+        qr = qrcode.make(uri, image_factory=qrcode.image.svg.SvgPathFillImage).to_string()
+        return result(dict(secret=secret, qr_data='data:image/svg+xml;base64,' + base64.b64encode(qr).decode(), expires_in=600))
+    code = data.get('code')
+    if not isinstance(code, str) or len(code) > 64:
+        raise HTTPException(422, 'Введите код подтверждения')
+    if name == 'confirm':
+        codes = account_mfa.confirm(user['id'], session_hash, code.strip())
+    elif name in ('disable', 'recovery'):
+        codes = account_mfa.manage(user['id'], data.get('password'), code.strip(), session_hash, disable=name == 'disable')
+    else:
+        raise HTTPException(404, 'Действие не найдено')
+    if codes is None:
+        raise HTTPException(400, 'Проверьте пароль и новый код приложения или неиспользованный резервный код')
+    return result(dict(enabled=name != 'disable', recovery_codes=codes))
+
+
+@router.post('/api/account/security/{name}')
+async def security_change(name: str, request: Request):
+    ready()
+    origin(request)
+    data = await body(request)
+    try:
+        return await run_in_threadpool(security_action, data, request, name)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(503, 'Не удалось изменить настройки защиты. Попробуйте позже') from None
 
 
 @router.get('/api/account/jobs')
