@@ -70,6 +70,8 @@ def redeem(challenge, supplied_hash, purpose, new_hash=None):
                 return False
             db.execute('UPDATE privetek_users SET password_hash = %s WHERE id = %s', (new_hash, user['id']))
             db.execute('DELETE FROM privetek_sessions WHERE user_id = %s', (user['id'],))
+            db.execute('DELETE FROM privetek_mfa_challenges WHERE user_id = %s', (user['id'],))
+            db.execute('DELETE FROM privetek_mfa_setup WHERE user_id = %s', (user['id'],))
         db.execute('UPDATE privetek_account_codes SET used_at = CURRENT_TIMESTAMP, pending_password_hash = NULL WHERE id = %s', (challenge,))
     return True
 
@@ -80,6 +82,9 @@ def login(email, password, token_hash):
         valid = password_matches(user['password_hash'] if user else None, password)
         if not user or not valid:
             return False
+        if user['mfa_enabled']:
+            from account_mfa import login_challenge
+            return login_challenge(db, user)
         db.execute('INSERT INTO privetek_sessions (token_hash,user_id,expires_at) VALUES (%s,%s,%s)',
                    (token_hash, user['id'], now() + timedelta(days=7)))
     return True
@@ -144,4 +149,6 @@ def cleanup():
         db.execute('DELETE FROM privetek_account_reports WHERE expires_at <= CURRENT_TIMESTAMP')
         db.execute('DELETE FROM privetek_sessions WHERE expires_at <= CURRENT_TIMESTAMP')
         db.execute('DELETE FROM privetek_account_codes WHERE expires_at <= CURRENT_TIMESTAMP')
+        db.execute('DELETE FROM privetek_mfa_setup WHERE expires_at <= CURRENT_TIMESTAMP')
+        db.execute('DELETE FROM privetek_mfa_challenges WHERE expires_at <= CURRENT_TIMESTAMP')
         db.execute("DELETE FROM privetek_account_limits WHERE window_start < CURRENT_TIMESTAMP - INTERVAL '2 hours'")

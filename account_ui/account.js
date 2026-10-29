@@ -1,5 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
+let mfaChallenge = '';
 let mode = 'login', challenge = '', csrf = '', userEmail = '', offset = 0, loading = false, authBusy = false;
 const statusLabels = {accepted:'В очереди', searching:'Проверяем источники', generating_report:'Готовим отчёт', sending:'Отправляем письмо', provider_accepted:'Письмо принято сервисом', failed:'Проверка не завершена', delivery_unknown:'Доставка требует проверки'};
 const activeStatuses = new Set(['accepted','searching','generating_report','sending']);
@@ -15,15 +16,17 @@ function switchMode(next, notice = '') {
   mode = next; message('auth-message',notice); $('auth-tabs').hidden = !['login','register'].includes(mode);
   $('login-tab').classList.toggle('active',mode==='login'); $('login-tab').setAttribute('aria-selected',String(mode==='login'));
   $('register-tab').classList.toggle('active',mode==='register'); $('register-tab').setAttribute('aria-selected',String(mode==='register'));
-  const config = {login:['С возвращением','Войдите, чтобы открыть ваши проверки.','Войти в кабинет →'],register:['Начните с себя','Создайте кабинет для ваших проверок.','Создать кабинет →'],verify:['Подтвердите email','Введите код из письма. Он действует 10 минут.','Подтвердить email →'],forgot:['Восстановить доступ','Укажите email, использованный при регистрации.','Получить код →'],reset:['Новый пароль','Введите код из письма и придумайте новый пароль.','Сохранить пароль →']}[mode];
+  const config = {login:['С возвращением','Войдите, чтобы открыть ваши проверки.','Войти в кабинет →'],register:['Начните с себя','Создайте кабинет для ваших проверок.','Создать кабинет →'],verify:['Подтвердите email','Введите код из письма. Он действует 10 минут.','Подтвердить email →'],forgot:['Восстановить доступ','Укажите email, использованный при регистрации.','Получить код →'],mfa:['Подтвердите вход','Введите код приложения или одноразовый резервный код.','Подтвердить вход →'],reset:['Новый пароль','Введите код из письма и придумайте новый пароль.','Сохранить пароль →']}[mode];
   $('auth-title').textContent = config[0]; $('auth-caption').textContent = config[1]; $('auth-submit').textContent = config[2];
-  $('email-field').hidden = ['verify','reset'].includes(mode); $('email').required = !['verify','reset'].includes(mode);
-  $('password-field').hidden = ['verify','forgot'].includes(mode); $('password').required = !['verify','forgot'].includes(mode);
+  $('email-field').hidden = ['verify','reset','mfa'].includes(mode); $('email').required = !['verify','reset','mfa'].includes(mode);
+  $('password-field').hidden = ['verify','forgot','mfa'].includes(mode); $('password').required = !['verify','forgot','mfa'].includes(mode);
   $('password').minLength = ['register','reset'].includes(mode) ? 15 : 1; $('password').autocomplete = ['register','reset'].includes(mode) ? 'new-password' : 'current-password';
   $('password-hint').hidden = !['register','reset'].includes(mode); $('password').value = ''; $('password').type = 'password'; $('show-password').textContent = 'Показать'; $('show-password').setAttribute('aria-label','Показать пароль');
   $('code-field').hidden = !['verify','reset'].includes(mode); $('code').required = ['verify','reset'].includes(mode); $('code').value = '';
+  $('login-mfa-field').hidden = mode !== 'mfa'; $('login-mfa-code').required = mode === 'mfa'; $('login-mfa-code').value = '';
+  if (mode !== 'mfa') mfaChallenge = '';
   $('forgot').hidden = mode !== 'login'; $('back-login').hidden = ['login','register'].includes(mode);
-  $('auth-note').textContent = ['verify','reset'].includes(mode) ? 'Не пришло письмо? Проверьте «Спам». Для нового кода вернитесь и повторите запрос.' : 'При регистрации нужно подтвердить email кодом из письма.';
+  $('auth-note').textContent = mode === 'mfa' ? 'Потеряли телефон? Используйте один из сохранённых резервных кодов. Сброс пароля не отключает 2FA.' : ['verify','reset'].includes(mode) ? 'Не пришло письмо? Проверьте «Спам». Для нового кода вернитесь и повторите запрос.' : 'При регистрации нужно подтвердить email кодом из письма.';
 }
 $('login-tab').onclick = () => { if (!authBusy) switchMode('login'); };
 $('register-tab').onclick = () => { if (!authBusy) switchMode('register'); };
@@ -34,22 +37,24 @@ $('auth-form').onsubmit = async event => {
   event.preventDefault(); if (authBusy) return; authBusy = true; $('auth-submit').disabled = true; message('auth-message','');
   const current = mode;
   try {
-    const path = {login:'login',register:'register',verify:'verify',forgot:'forgot-password',reset:'reset-password'}[current];
+    const path = {login:'login',register:'register',verify:'verify',forgot:'forgot-password',reset:'reset-password',mfa:'mfa-verify'}[current];
     const payload = ['verify','reset'].includes(current) ? {challenge_id:challenge,code:$('code').value} : {email:$('email').value};
+    if (current === 'mfa') { payload.challenge_id = mfaChallenge; payload.code = $('login-mfa-code').value.trim(); delete payload.email; }
     if (['login','register','reset'].includes(current)) payload.password = $('password').value;
     const data = await api('auth/' + path,{method:'POST',body:JSON.stringify(payload)});
-    if (current==='login') { $('password').value=''; await openDashboard(); }
+    if (current === 'login' && data.mfa_required) { switchMode('mfa'); mfaChallenge = data.challenge_id; $('login-mfa-code').focus(); }
+    else if (current==='login' || current==='mfa') { $('password').value=''; $('login-mfa-code').value=''; mfaChallenge=''; await openDashboard(); }
     else if (current==='register' || current==='forgot') { challenge=data.challenge_id; switchMode(current==='register'?'verify':'reset',data.message); $('code').focus(); }
     else { challenge=''; switchMode('login',data.message); $('password').focus(); }
   } catch (error) { message('auth-message',error.message,true); }
   finally { authBusy=false; $('auth-submit').disabled=false; }
 };
-function signedOut(notice='') { generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').replaceChildren(); $('check-dialog').close(); switchMode('login',notice); }
+function signedOut(notice='') { clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').replaceChildren(); $('check-dialog').close(); switchMode('login',notice); }
 async function openDashboard() {
   const ticket=++generation; let user;
   try { user = await api('me'); } catch(error) { if(ticket!==generation)return; throw error; }
   if(ticket!==generation)return; loading=false; csrf=user.csrf_token; userEmail=user.email;
-  $('account-email').textContent=userEmail; $('check-email').value=userEmail; $('auth-view').hidden=true; $('dashboard').hidden=false; $('logout').hidden=false; offset=0; await loadJobs(true);
+  $('account-email').textContent=userEmail; $('check-email').value=userEmail; $('auth-view').hidden=true; $('dashboard').hidden=false; $('logout').hidden=false; offset=0; await Promise.all([loadJobs(true), loadSecurity()]);
 }
 function textEl(tag, cls, text) { const el=document.createElement(tag); el.className=cls; el.textContent=text; return el; }
 function renderJob(job) {
@@ -88,4 +93,55 @@ $('check-form').onsubmit=async event=>{
   catch(error){if(error.status===401)signedOut('Сессия завершилась. Войдите снова.');else message('check-message',error.message,true);}finally{$('check-submit').disabled=false;}
 };
 setInterval(()=>{if(!$('dashboard').hidden && !document.hidden && hasActive && offset<=20)loadJobs(true);},15000);
+let securityBusy = false, securityGeneration = 0;
+function clearMfaSecrets() {
+  securityGeneration++;
+  ['mfa-password','mfa-factor','mfa-confirm-code','mfa-secret'].forEach(id => $(id).value='');
+  $('mfa-qr').removeAttribute('src'); $('mfa-enrollment').hidden=true;
+  $('mfa-codes-text').textContent=''; $('mfa-recovery-codes').hidden=true;
+}
+function showRecovery(codes) {
+  $('mfa-codes-text').textContent=codes.join('\n'); $('mfa-recovery-codes').hidden=!codes.length;
+  if(codes.length) $('mfa-recovery-codes').scrollIntoView({block:'nearest'});
+}
+async function loadSecurity() {
+  const ticket=generation;
+  try {
+    const data=await api('security'); if(ticket!==generation)return;
+    $('mfa-status').textContent=data.enabled?'2FA включена':'2FA не подключена';
+    $('mfa-status').className='badge'+(data.enabled?'':' pending');
+    $('mfa-setup-button').hidden=data.enabled;
+    $('mfa-recovery-button').hidden=!data.enabled; $('mfa-disable-button').hidden=!data.enabled;
+    $('mfa-factor-field').hidden=!data.enabled; $('mfa-setup-button').disabled=false;
+  } catch(error) {if(ticket===generation) message('mfa-message','Не удалось загрузить настройки защиты. Обновите страницу.',true);}
+}
+async function changeSecurity(name) {
+  if(securityBusy)return; securityBusy=true; const ticket=generation;
+  const secretTicket=++securityGeneration;
+  $('mfa-form').querySelectorAll('button').forEach(b=>b.disabled=true);
+  message('mfa-message','');
+  try {
+    const payload=name==='confirm'?{code:$('mfa-confirm-code').value.trim()}:{password:$('mfa-password').value,code:$('mfa-factor').value.trim()};
+    const data=await api('security/'+name,{method:'POST',body:JSON.stringify(payload)});
+    if(ticket!==generation || secretTicket!==securityGeneration)return;
+    clearMfaSecrets();
+    if(name==='setup') {
+      $('mfa-qr').src=data.qr_data; $('mfa-secret').value=data.secret; $('mfa-enrollment').hidden=false;
+      $('mfa-confirm-code').focus();
+    } else {
+      await loadSecurity(); if(ticket!==generation)return;
+      showRecovery(data.recovery_codes||[]);
+      message('mfa-message',name==='disable'?'2FA отключена. Другие сессии завершены.':name==='confirm'?'2FA подключена. Другие сессии завершены. Сохраните резервные коды.':'Прежние резервные коды отменены. Сохраните новые.');
+    }
+  } catch(error) {if(ticket===generation) message('mfa-message',error.message,true);}
+  finally {securityBusy=false; $('mfa-form').querySelectorAll('button').forEach(b=>b.disabled=false); $('mfa-password').value=''; $('mfa-factor').value='';}
+}
+$('mfa-form').onsubmit=event=>event.preventDefault();
+$('mfa-setup-button').onclick=()=>changeSecurity('setup');
+$('mfa-recovery-button').onclick=()=>{if(confirm('Создать новые резервные коды? Все прежние коды перестанут работать.'))changeSecurity('recovery');};
+$('mfa-disable-button').onclick=()=>{if(confirm('Отключить второй фактор для вашего аккаунта?'))changeSecurity('disable');};
+$('mfa-confirm-form').onsubmit=event=>{event.preventDefault();changeSecurity('confirm');};
+$('mfa-cancel').onclick=()=>clearMfaSecrets();
+$('mfa-codes-saved').onclick=()=>{ $('mfa-codes-text').textContent=''; $('mfa-recovery-codes').hidden=true; };
+window.addEventListener('beforeunload',event=>{if(!$('mfa-recovery-codes').hidden){event.preventDefault();event.returnValue='';}});
 openDashboard().catch(error=>{signedOut(); if(error.status!==401)message('auth-message',error.message,true);});
