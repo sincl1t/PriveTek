@@ -160,6 +160,8 @@ def cleanup():
         db.execute('DELETE FROM privetek_mfa_setup WHERE expires_at <= CURRENT_TIMESTAMP')
         db.execute('DELETE FROM privetek_mfa_challenges WHERE expires_at <= CURRENT_TIMESTAMP')
         db.execute("DELETE FROM privetek_account_limits WHERE window_start < CURRENT_TIMESTAMP - INTERVAL '2 hours'")
+    import monitor_store
+    monitor_store.cleanup()
 
 
 def identity_snapshot(owner_key, job_id):

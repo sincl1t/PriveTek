@@ -23,6 +23,7 @@ import job_store
 import account_crypto
 import discovery
 from account_routes import router as account_router
+from monitor_routes import router as monitor_router
 from submission_guard import SubmissionGuard, Limited
 from privacy_logging import configure_logging
 
@@ -60,6 +61,7 @@ async def account_cleanup_loop():
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(account_router)
+app.include_router(monitor_router)
 
 
 @app.middleware("http")
@@ -283,6 +285,26 @@ async def account_submit(request: Request):
         raise HTTPException(422, 'Проверьте формат телефона и username') from None
     response = await start_submission(submission)
     return result(dict(job_id=response.headers['X-Request-ID'], duplicate=response.headers.get('X-Duplicate') == 'true'), 202)
+
+
+@app.post('/api/internal/monitor/tick')
+async def monitor_tick(request: Request):
+    from monitor_routes import available
+    token=os.getenv('MONITOR_RUNNER_TOKEN','')
+    supplied=request.headers.get('authorization','')
+    if not available() or not secrets.compare_digest(supplied,'Bearer '+token):
+        raise HTTPException(403,'Forbidden')
+    from account_store import quota
+    if not await run_in_threadpool(quota,[('monitor-runner:global','all',50)]):
+        raise HTTPException(429,'Runner limit')
+    if not slots.acquire(blocking=False):
+        return JSONResponse({'operation':'busy'})
+    try:
+        from monitor_worker import tick
+        outcome=await run_in_threadpool(tick)
+        return JSONResponse(outcome,headers={'Cache-Control':'no-store'})
+    finally:
+        slots.release()
 
 
 if __name__ == '__main__':
