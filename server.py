@@ -287,13 +287,25 @@ async def account_submit(request: Request):
     return result(dict(job_id=response.headers['X-Request-ID'], duplicate=response.headers.get('X-Duplicate') == 'true'), 202)
 
 
-@app.post('/api/internal/monitor/tick')
-async def monitor_tick(request: Request):
+def monitor_authorize(request):
     from monitor_routes import available
     token=os.getenv('MONITOR_RUNNER_TOKEN','')
     supplied=request.headers.get('authorization','')
     if not available() or not secrets.compare_digest(supplied,'Bearer '+token):
         raise HTTPException(403,'Forbidden')
+
+
+@app.get('/api/internal/monitor/status')
+async def monitor_status(request: Request):
+    monitor_authorize(request)
+    import monitor_store
+    status=await run_in_threadpool(monitor_store.scheduler_status)
+    return JSONResponse(jsonable_encoder(status),headers={'Cache-Control':'no-store'})
+
+
+@app.post('/api/internal/monitor/tick')
+async def monitor_tick(request: Request):
+    monitor_authorize(request)
     from account_store import quota
     if not await run_in_threadpool(quota,[('monitor-runner:global','all',50)]):
         raise HTTPException(429,'Runner limit')

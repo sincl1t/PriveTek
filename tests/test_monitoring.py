@@ -261,3 +261,14 @@ def test_conflicting_observations_are_unavailable_not_new():
     observed=m.observe(raw)
     assert not observed['items'] and not observed['initialized']
     assert observed['unavailable']==['GitHub:username']
+
+
+def test_db_scheduler_status_is_read_only_and_protected(monitor_db,monkeypatch):
+    c,_,user=enrolled(monitor_db)
+    work=MagicMock(side_effect=AssertionError('No scan'));monkeypatch.setattr(monitor_worker,'tick',work)
+    path='/api/internal/monitor/status'
+    assert c.get(path).status_code==403
+    r=c.get(path,headers={'Authorization':'Bearer '+'test-monitor-runner-'+'x'*40})
+    assert r.status_code==200 and r.json()['ready'] and r.json()['active_subscriptions']==1
+    assert 'owner@example.com' not in r.text and user not in r.text
+    work.assert_not_called()

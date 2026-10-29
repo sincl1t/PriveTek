@@ -185,3 +185,10 @@ def claim_mail():
 
 def finish_mail(run_id,accepted):
     with job_store.connect() as db:db.execute("UPDATE privetek_monitor_runs SET mail_state=%s WHERE id=%s AND mail_state='sending'",('provider_accepted' if accepted else 'delivery_unknown',run_id))
+
+
+def scheduler_status():
+    with job_store.connect() as db:
+        end=db.execute('SELECT ends_at FROM privetek_monitor_pilot WHERE id=1').fetchone()['ends_at']
+        row=db.execute("SELECT count(*) AS subscriptions,count(*) FILTER (WHERE state='active') AS active FROM privetek_monitors").fetchone()
+    return dict(ready=True,pilot_ends_at=end,subscriptions=row['subscriptions'],active_subscriptions=row['active'])
