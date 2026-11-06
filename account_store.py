@@ -62,9 +62,12 @@ def redeem(challenge, supplied_hash, purpose, new_hash=None):
             db.execute('UPDATE privetek_account_codes SET attempts = attempts + 1 WHERE id = %s', (challenge,))
             return False
         if purpose == 'register':
-            db.execute('''INSERT INTO privetek_users (id,email,email_key,password_hash)
-                VALUES (%s,%s,%s,%s) ON CONFLICT (email_key) DO NOTHING''',
-                (uuid4().hex, row['email'], row['email_key'], row['pending_password_hash']))
+            created = db.execute('''INSERT INTO privetek_users (id,email,email_key,password_hash)
+                VALUES (%s,%s,%s,%s) ON CONFLICT (email_key) DO NOTHING RETURNING id''',
+                (uuid4().hex, row['email'], row['email_key'], row['pending_password_hash'])).fetchone()
+            if created:
+                import acquisition
+                acquisition.transaction_event(db, acquisition.registered, challenge, created['id'])
         else:
             user = db.execute('SELECT id FROM privetek_users WHERE email_key = %s FOR UPDATE', (row['email_key'],)).fetchone()
             if not user or not new_hash:
@@ -131,9 +134,12 @@ def save_report(job_id, pdf_path, identity=None):
             raise ValueError('Identity snapshot too large')
         identity_ciphertext = report_cipher().encrypt(payload)
     with job_store.connect() as db:
-        db.execute('''INSERT INTO privetek_account_reports (job_id,ciphertext,expires_at,identity_ciphertext,identity_revision)
+        saved = db.execute('''INSERT INTO privetek_account_reports (job_id,ciphertext,expires_at,identity_ciphertext,identity_revision)
             SELECT %s,%s,%s,%s,%s WHERE EXISTS (SELECT 1 FROM privetek_job_owners WHERE job_id = %s)
-            ON CONFLICT (job_id) DO NOTHING''', (job_id, ciphertext, now() + timedelta(days=30), identity_ciphertext, 1 if identity is not None else 0, job_id))
+            ON CONFLICT (job_id) DO NOTHING RETURNING job_id''', (job_id, ciphertext, now() + timedelta(days=30), identity_ciphertext, 1 if identity is not None else 0, job_id)).fetchone()
+        if saved:
+            import acquisition
+            acquisition.transaction_event(db, acquisition.job_event, job_id, 'report_ready')
 
 
 def report(owner_key, job_id):

@@ -66,6 +66,12 @@ def record(job_id, status, owner_email=None):
             connection.execute('''INSERT INTO privetek_job_owners (job_id,email_key)
                 VALUES (%s,%s) ON CONFLICT (job_id) DO NOTHING''',
                 (job_id, email_key(owner_email)))
+        if status == 'accepted':
+            import acquisition
+            acquisition.transaction_event(connection, acquisition.job_event, job_id, 'report_ordered')
+        elif status == 'failed':
+            import acquisition
+            acquisition.transaction_event(connection, acquisition.job_event, job_id, 'report_failed')
 
 
 def get(job_id):

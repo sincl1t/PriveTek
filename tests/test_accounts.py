@@ -117,7 +117,7 @@ def db(settings,monkeypatch):
     monkeypatch.setenv('DATABASE_URL',dsn)
     job_store.initialize()
     with job_store.connect() as connection:
-        connection.execute('TRUNCATE privetek_users,privetek_account_codes,privetek_sessions,privetek_account_limits,privetek_jobs,privetek_job_owners,privetek_job_events,privetek_account_reports CASCADE')
+        connection.execute('TRUNCATE privetek_analytics_events,privetek_analytics_challenges,privetek_analytics_visitors,privetek_users,privetek_account_codes,privetek_sessions,privetek_account_limits,privetek_jobs,privetek_job_owners,privetek_job_events,privetek_account_reports CASCADE')
     sent=[]
     monkeypatch.setattr(server.email_sender,'validate_settings',lambda:None)
     monkeypatch.setattr(server.email_sender,'send_account_code',lambda email,code,purpose:sent.append((email,code,purpose)))

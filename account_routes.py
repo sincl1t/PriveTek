@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 import account_crypto as crypto
 import account_store as store
 import email_sender
+import acquisition
 
 router = APIRouter()
 COOKIE = '__Host-privetek_session'
@@ -91,6 +92,8 @@ def issue(data, request, purpose):
         except Exception:
             store.cancel_code(challenge)
             raise HTTPException(503, 'Не удалось отправить код. Попробуйте позже') from None
+    if purpose == 'register':
+        acquisition.safe(acquisition.bind_challenge, request, challenge)
     # Uniform HTTP response even when the account exists / does not exist.
     return result(dict(challenge_id=challenge, expires_in=600,
                        message='Если действие доступно для этого адреса, код придёт на почту. Проверьте также папку «Спам».'))
@@ -262,6 +265,7 @@ def download(job_id: str, request: Request):
     content = store.report(user['email_key'], job_id)
     if content is None:
         raise HTTPException(404, 'Отчёт не найден или срок хранения истёк')
+    acquisition.safe(acquisition.download, user, job_id)
     return Response(content, media_type='application/pdf', headers={**HEADERS,
                     'Content-Disposition': 'attachment; filename="PriveTek-report.pdf"'})
 
@@ -358,3 +362,24 @@ def identity_pdf(job_id: str, request: Request):
         content = Path(path).read_bytes()
     return Response(content, media_type='application/pdf', headers={**HEADERS,
         'Content-Disposition': 'attachment; filename="PriveTek-identity.pdf"'})
+
+
+@router.post('/api/account/analytics/event')
+async def analytics_event(request: Request):
+    ready()
+    origin(request)
+    data = await body(request)
+    kind = data.get('event')
+    if not isinstance(kind, str) or kind not in acquisition.CLIENT_EVENTS or set(data) != {'event'}:
+        raise HTTPException(422, 'Неизвестное событие')
+    # Existing persistent rate limiter; no caller-selected IDs or raw error text.
+    key = acquisition.visitor(request)
+    if not key:
+        return result({'accepted': False})
+    ip = request.client.host if request.client else 'unknown'
+    allowed = await run_in_threadpool(store.quota, [('analytics-event:visitor', key, 120),
+        ('analytics-event:ip', ip, 1000), ('analytics-event:global', 'all', 10000)])
+    if not allowed:
+        raise HTTPException(429, 'Слишком много событий')
+    await run_in_threadpool(acquisition.safe, acquisition.client_event, request, kind)
+    return result({'accepted': True})
