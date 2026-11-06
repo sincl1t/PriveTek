@@ -68,8 +68,8 @@ h1 span { color: var(--accent); }
 .auth-card, .jobs-card, dialog { --muted: #626788; color: var(--ink); background: #fff; }
 .auth-card { min-width: 0; padding: 36px 36px 0; border: 1px solid #ffffff66; border-radius: 32px; box-shadow: 0 24px 80px #00000030; position: relative; }
 .card-symbol { position: absolute; right: 35px; top: 30px; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: var(--ink); color: var(--accent); font-size: 26px; }
-.tabs { display: flex; gap: 26px; border-bottom: 1px solid var(--line); margin-right: 65px; margin-bottom: 29px; }
-.tabs button { border: 0; background: none; padding: 0 0 14px; color: var(--muted); font-size: 15px; font-weight: 600; }
+.tabs { display: flex; gap: 20px; flex-wrap:wrap; border-bottom: 1px solid var(--line); margin-right: 65px; margin-bottom: 29px; }
+.tabs a { text-decoration:none; border: 0; background: none; padding: 0 0 14px; color: var(--muted); font-size: 15px; font-weight: 600; }
 .tabs .active { color: var(--ink); border-bottom: 3px solid var(--ink); font-weight: 800; }
 h2 { font-size: 29px; line-height: 1.2; font-weight: 750; letter-spacing: -.5px; margin: 0 0 10px; }
 .muted { color: var(--muted); }
@@ -202,3 +202,12 @@ body.dialog-open { overflow: hidden; }
 #check-dialog { max-height:calc(100% - 32px); overflow-y:auto; }
 #check-dialog .dialog-head, #coverage-dialog .dialog-head { position:sticky; top:0; background:#fff; z-index:2; }
 #check-dialog .dialog-head h2, #coverage-dialog .dialog-head h2 { margin:10px 0; }
+
+.draft-banner { margin:30px 0; padding:24px; border:1px solid #8bf8f4; border-radius:24px; background:#fff; color:var(--ink); }
+.draft-banner h2 { font-size:23px; }.draft-actions {display:flex;gap:18px;align-items:center;flex-wrap:wrap;}
+.guest-start {max-width:760px;padding-top:30px;padding-bottom:50px;}.guest-start h1 {font-size:40px;}.guest-start .auth-card {padding-bottom:20px;margin-top:30px;}
+@media(max-width:640px){.tabs {margin-right:40px;gap:12px;}.tabs a {font-size:14px;}.draft-banner {padding:20px;}.guest-start h1{font-size:32px;}}
+
+.has-draft .auth-layout {grid-template-columns:minmax(0,1fr);min-height:0;padding:20px 0 48px;}
+.has-draft .intro {display:none;}.has-draft .auth-card {width:100%;max-width:520px;margin:0 auto;}
+.draft-banner a, .guest-start a {color:var(--ink);}.tabs a {min-height:44px;display:inline-flex;align-items:center;}
