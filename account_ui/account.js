@@ -38,6 +38,16 @@ document.addEventListener('keydown', event => {
     else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
   }
 });
+function trackEvent(event) {
+  // Only fixed event names; never field values, URLs or error messages.
+  fetch('/api/account/analytics/event', {method:'POST', credentials:'same-origin',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({event}), keepalive:true}).catch(()=>{});
+}
+trackEvent('form_open');
+let registrationStarted = false;
+$('auth-form').addEventListener('input', () => {
+  if (mode === 'register' && !registrationStarted) { registrationStarted = true; trackEvent('registration_start'); }
+});
 let mfaChallenge = '';
 let mode = 'login', challenge = '', csrf = '', userEmail = '', offset = 0, loading = false, authBusy = false;
 const statusLabels = {accepted:'В очереди', searching:'Проверяем источники', generating_report:'Готовим отчёт', sending:'Отправляем письмо', provider_accepted:'Письмо принято сервисом', failed:'Проверка не завершена', delivery_unknown:'Доставка требует проверки'};
@@ -124,7 +134,7 @@ async function loadJobs(reset=false) {
 }
 $('refresh').onclick=()=>loadJobs(true); $('load-more').onclick=()=>loadJobs(false);
 $('logout').onclick=async()=>{ $('logout').disabled=true; try{await api('auth/logout',{method:'POST',body:'{}'}); signedOut('Вы вышли из кабинета.');}catch(error){handleDashboardError(error);}finally{$('logout').disabled=false;} };
-function openCheck(){message('check-message',''); openDialog('check-dialog');}
+function openCheck(){trackEvent('report_form_open'); message('check-message',''); openDialog('check-dialog');}
 $('new-check').onclick=openCheck; $('empty-check').onclick=openCheck; $('close-check').onclick=()=>closeDialog('check-dialog');
 $('check-form').onsubmit=async event=>{
   event.preventDefault(); $('check-submit').disabled=true; message('check-message','');

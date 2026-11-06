@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, fi
 import email_sender
 import pdf_gen
 import job_store
+import acquisition
 import account_crypto
 import discovery
 from account_routes import router as account_router
@@ -55,6 +56,7 @@ async def account_cleanup_loop():
     while True:
         try:
             await run_in_threadpool(account_store.cleanup)
+            await run_in_threadpool(acquisition.safe, acquisition.cleanup)
         except Exception as error:
             logger.error('account_cleanup_failed=%s', type(error).__name__)
         await asyncio.sleep(3600)
@@ -66,13 +68,23 @@ app.include_router(monitor_router)
 
 @app.middleware("http")
 async def protect_account_responses(request, call_next):
-    private = request.url.path.startswith("/api/account/") or request.url.path.startswith("/account")
+    private = request.url.path.startswith("/api/account/") or request.url.path.startswith("/account") or request.url.path == '/go'
     try:
         response = await call_next(request)
     except Exception:
         if not private:
             raise
         response = JSONResponse({"detail": "Кабинет временно недоступен. Попробуйте позже"}, status_code=503)
+    if private and acquisition.enabled():
+        if request.method == 'GET' and request.url.path in ('/account', '/go'):
+            value = await run_in_threadpool(acquisition.safe, acquisition.visit, request)
+            if value:
+                response.set_cookie(acquisition.COOKIE, value, max_age=30*86400, secure=True, httponly=True, samesite='lax', path='/')
+        stage = {'/api/account/auth/register':'registration', '/api/account/auth/verify':'verification',
+                 '/api/account/auth/login':'login', '/api/account/auth/mfa-verify':'mfa',
+                 '/api/account/jobs':'report_order'}.get(request.url.path)
+        if stage and request.method == 'POST' and response.status_code >= 400:
+            await run_in_threadpool(acquisition.safe, acquisition.error, request, stage, response.status_code)
     if private:
         from account_routes import HEADERS
         response.headers.update(HEADERS)
@@ -284,6 +296,8 @@ async def account_submit(request: Request):
     except (ValidationError, TypeError):
         raise HTTPException(422, 'Проверьте формат телефона и username') from None
     response = await start_submission(submission)
+    if response.headers.get('X-Duplicate') != 'true':
+        await run_in_threadpool(acquisition.safe, acquisition.associate_job, request, response.headers['X-Request-ID'])
     return result(dict(job_id=response.headers['X-Request-ID'], duplicate=response.headers.get('X-Duplicate') == 'true'), 202)
 
 
@@ -317,6 +331,24 @@ async def monitor_tick(request: Request):
         return JSONResponse(outcome,headers={'Cache-Control':'no-store'})
     finally:
         slots.release()
+
+
+@app.get('/go')
+def acquisition_link():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse('https://privetek.ru/', status_code=302, headers={'Cache-Control':'no-store', 'Referrer-Policy':'no-referrer'})
+
+
+@app.get('/api/internal/analytics/summary')
+def analytics_summary(request: Request, days: int = 30):
+    require_team(request)
+    if not 1 <= days <= 90:
+        raise HTTPException(422, 'Период от 1 до 90 дней')
+    try:
+        data = acquisition.summary(days)
+    except Exception:
+        raise HTTPException(503, 'Сводка временно недоступна') from None
+    return JSONResponse(jsonable_encoder(data), headers={'Cache-Control':'no-store'})
 
 
 if __name__ == '__main__':
