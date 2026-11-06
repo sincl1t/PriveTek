@@ -77,15 +77,17 @@ def visit(request):
         return None
     existing = visitor(request)
     with job_store.connect() as db:
-        if existing and db.execute('SELECT id FROM privetek_analytics_visitors WHERE id=%s', (existing,)).fetchone():
-            return None
         import account_store
         ip = request.client.host if request.client else 'unknown'
         if not account_store.quota([('analytics-visit:ip', ip, 300), ('analytics-visit:global', 'all', 10000)]):
             return None
+        if existing and db.execute('SELECT id FROM privetek_analytics_visitors WHERE id=%s', (existing,)).fetchone():
+            event(db, 'landing', 'landing:' + secrets.token_hex(16), existing)
+            return None
         value = token(); key = value.split('.')[0]
         db.execute('INSERT INTO privetek_analytics_visitors (id,source,medium,campaign) VALUES (%s,%s,%s,%s)', (key, *attribution(request.query_params)))
         event(db, 'visit', 'visit:' + key, key)
+        event(db, 'landing', 'landing:' + secrets.token_hex(16), key)
         return value
 
 
@@ -177,7 +179,8 @@ def summary(days):
         since = db.execute("SELECT applied_at FROM privetek_schema_migrations WHERE version='007_acquisition_analytics.sql'").fetchone()
     return dict(days=days, tracking_since=since['applied_at'] if since else None, channels=channels,
                 accounts=accounts[:1000], accounts_truncated=len(accounts)>1000,
-                definitions={'visit':'unique 30-day browser identifier; not a person or every page view',
+                definitions={'landing':'observed GET /go or /account, including repeat loads and bots; not proof Tilda loaded',
+                             'visit':'unique 30-day browser identifier; not a person or every page view',
                              'ui_events':'one event per browser, kind and UTC day; untrusted client observations',
                              'error':'one observation per browser, stage, HTTP status and UTC day; not every attempt',
                              'report_response':'authorized PDF response initiated; does not prove saved or read',

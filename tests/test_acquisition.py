@@ -78,7 +78,7 @@ def test_db_first_touch_registration_jobs_ready_and_download(db,monkeypatch,tmp_
     assert c.get('/api/account/jobs/'+'b'*32+'/report').status_code==404
     result=a.summary(30)
     counts={row['kind']:row['events'] for row in result['channels'] if row['source']=='vk'}
-    assert counts=={'visit':1,'registration_start':1,'contact_verified':1,'registered':1,'report_ordered':2,'report_ready':1,'report_response':1}
+    assert counts=={'visit':1,'landing':2,'registration_start':1,'contact_verified':1,'registered':1,'report_ordered':2,'report_ready':1,'report_response':1}
     assert result['accounts']==[{'account_id':user['id'],'ordered':2,'ordered_total':2,'ready_observed':1,'report_responses_observed':1}]
     assert c.post('/api/account/auth/verify',json={'challenge_id':'a'*48,'code':'12345678'}).status_code==400
     assert any(row['kind']=='error_verification' for row in a.summary(30)['channels'])
