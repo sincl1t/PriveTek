@@ -43,7 +43,6 @@ function trackEvent(event) {
   fetch('/api/account/analytics/event', {method:'POST', credentials:'same-origin',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify({event}), keepalive:true}).catch(()=>{});
 }
-trackEvent('form_open');
 let registrationStarted = false;
 $('auth-form').addEventListener('input', () => {
   if (mode === 'register' && !registrationStarted) { registrationStarted = true; trackEvent('registration_start'); }
@@ -97,7 +96,7 @@ $('auth-form').onsubmit = async event => {
   } catch (error) { message('auth-message',error.message,true); }
   finally { authBusy=false; $('auth-submit').disabled=false; }
 };
-function signedOut(notice='') { clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode('login',notice); }
+function signedOut(notice='') { trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode('login',notice); }
 async function openDashboard() {
   const ticket=++generation; let user;
   try { user = await api('me'); } catch(error) { if(ticket!==generation)return; throw error; }
