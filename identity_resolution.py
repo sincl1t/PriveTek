@@ -3,7 +3,7 @@ from copy import deepcopy
 import hashlib
 import json
 from urllib.parse import urlsplit, urlunsplit
-from search_inputs import normalize_phone, normalize_username
+from search_inputs import normalize_phone, normalize_username, normalize_usernames
 
 MAX_ITEMS = 200
 DECISIONS = {'unreviewed', 'mine', 'not_mine'}
@@ -29,10 +29,11 @@ def canonical_profile(source, url):
         return None
 
 
-def build(data, email=None, phone=None, username=None):
+def build(data, email=None, phone=None, username=None, additional_usernames=None):
     """Each observation links only to its query. No shared nickname/person union."""
     identifiers = []
-    values = {'email': (email or '').strip().casefold(), 'phone': normalize_phone(phone), 'username': normalize_username(username)}
+    usernames = normalize_usernames(username, additional_usernames)
+    values = {'email': (email or '').strip().casefold(), 'phone': normalize_phone(phone), 'username': usernames[0] if usernames else ''}
     for kind, value in values.items():
         if not value:
             continue
@@ -43,6 +44,9 @@ def build(data, email=None, phone=None, username=None):
         elif kind == 'phone':
             masked = '+' + '*' * max(0, len(value)-5) + value[-4:]
         identifiers.append(dict(id='identifier-'+kind, kind=kind, title=masked, decision='unreviewed'))
+    username_ids = {name: 'identifier-username' + ('-' + str(index+1) if index else '') for index, name in enumerate(usernames)}
+    for name in usernames[1:]:
+        identifiers.append(dict(id=username_ids[name], kind='username', title=name, decision='unreviewed'))
     nodes = {}; discarded = 0
     for row in data.get('checks', []):
         if not isinstance(row, dict) or row.get('status') not in ('found', 'possible'):
@@ -51,25 +55,31 @@ def build(data, email=None, phone=None, username=None):
         query = 'email' if kind in ('email', 'avatar', 'breach') else kind
         if query not in values or not values[query]:
             continue
+        identifier_id = 'identifier-' + query
+        if kind == 'username':
+            query_name = row.get('query_username', values['username'])
+            identifier_id = username_ids.get(query_name) if isinstance(query_name, str) else None
+            if not identifier_id:
+                continue
         source = str(row.get('source', ''))[:80]
         url = canonical_profile(source, row.get('profile_url')) if kind == 'username' else None
         # Exact account grouping requires a canonical, source-owned profile URL.
         if kind == 'username' and not url:
             continue
         title = source + (' — публичный профиль' if kind == 'username' else ' — результат по ' + query)
-        node_id = key([source, kind, url])
+        node_id = key([source, kind, url] + ([identifier_id] if kind == 'username' and len(usernames)>1 else []))
         if node_id not in nodes:
             if len(nodes) >= MAX_ITEMS:
                 discarded += 1
                 continue
             nodes[node_id] = dict(id=node_id, source=source, kind=kind, title=title,
-                profile_url=url, identifier_id='identifier-'+query, decision='unreviewed',
+                profile_url=url, identifier_id=identifier_id, decision='unreviewed',
                 evidence='indirect_signal' if row['status'] == 'possible' else 'source_match', observations=[])
         observation = dict(status=row['status'], checked_at=row.get('checked_at'), reason=str(row.get('reason', ''))[:1000])
         if observation not in nodes[node_id]['observations']:
             nodes[node_id]['observations'].append(observation)
     snapshot = dict(version=1, revision=1, identifiers=identifiers, findings=list(nodes.values()),
-                    omitted=discarded, automatic_person_merges=0)
+                    omitted=discarded, automatic_person_merges=0, coverage=coverage(data.get('checks', [])))
     return summarize(snapshot)
 
 
@@ -93,3 +103,19 @@ def decide(snapshot, item_id, decision):
     item['decision'] = decision
     result['revision'] += 1
     return summarize(result)
+
+
+def coverage(checks):
+    groups = {'found':'completed', 'possible':'completed', 'not_found':'completed',
+              'unknown':'inconclusive', 'unavailable':'unavailable', 'skipped':'skipped', 'disabled':'disabled'}
+    counts = dict.fromkeys(['completed','inconclusive','unavailable','skipped','disabled'], 0)
+    entries = []
+    for row in checks[:100]:
+        state = row.get('status', 'unknown')
+        if state not in groups:
+            state = 'unknown'
+        counts[groups[state]] += 1
+        entries.append(dict(source=str(row.get('source','Источник'))[:80], kind=str(row.get('kind',''))[:20],
+            status=state, reason=str(row.get('reason',''))[:1000],
+            query_username=str(row.get('query_username',''))[:64], checked_at=row.get('checked_at')))
+    return dict(counts=counts, entries=entries, omitted=max(0,len(checks)-100))

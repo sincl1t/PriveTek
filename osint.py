@@ -6,7 +6,7 @@ from public_sources import SOURCES, run_profiles
 import httpx
 import phonenumbers
 import trio
-from search_inputs import normalize_phone, normalize_username
+from search_inputs import normalize_phone, normalize_username, normalize_usernames
 from report_data import utc_now, prepare
 from source_checks import instagram, amazon_email as holehe_amazon, amazon_phone as ignorant_amazon, spotify, gravatar, github_username
 
@@ -50,9 +50,9 @@ def collect(items, errors, checks=None, kind="email"):
     return found if completed else None
 
 
-def search(email=None, phone=None, username=None):
+def search(email=None, phone=None, username=None, additional_usernames=None):
     phone = normalize_phone(phone)
-    username = normalize_username(username)
+    usernames = normalize_usernames(username, additional_usernames)
     results = {'email_breach': None, 'email_registrations': None,
                'phone_registrations': None, 'username_profiles': None, 'errors': [], 'checks': []}
     errors = results['errors']
@@ -104,18 +104,29 @@ def search(email=None, phone=None, username=None):
     else:
         for source in ('Instagram', 'Amazon'):
             checks.append(dict(source=source, kind='phone', status='skipped', reason='Телефон не указан.'))
-    if username:
-        profile_checks = trio.run(run_profiles, username)
-        profile_checks.extend(trio.run(discovery.run, username))
+    if usernames:
+        profile_checks = []
+        for handle in usernames:
+            for runner, sources in [(run_profiles, SOURCES), (discovery.run, discovery.SOURCES)]:
+                try:
+                    rows = trio.run(runner, handle)
+                except Exception:
+                    rows = [dict(source=source[0], kind='username', status='unavailable',
+                                 reason='Ошибка выполнения проверки.') for source in sources]
+                profile_checks.extend(dict(row, query_username=handle) for row in rows)
         checks.extend(profile_checks)
-        results['username_profiles'] = [dict(site=c['source'], profile_url=c['profile_url'])
-                                       for c in profile_checks if c['status'] == 'found']
+        seen = set(); results['username_profiles'] = []
+        for row in profile_checks:
+            pair = (row['source'], row.get('profile_url'))
+            if row['status'] == 'found' and pair not in seen:
+                seen.add(pair)
+                results['username_profiles'].append(dict(site=row['source'], profile_url=row['profile_url']))
     else:
         for source in SOURCES + discovery.SOURCES:
             checks.append(dict(source=source[0], kind='username', status='skipped', reason='Username не указан.'))
     output = prepare(results)
     from identity_resolution import build
-    output['identity_resolution'] = build(output, email, phone, username)
+    output['identity_resolution'] = build(output, email, phone, username, additional_usernames)
     from analysis_layer import analyze
     output['identity_resolution']['analysis_basis'] = analyze(output)['basis']
     return output

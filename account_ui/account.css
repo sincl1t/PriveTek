@@ -189,3 +189,16 @@ dialog:not([open]) { display: none; }
 .dialog-backdrop { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: #060024b8; z-index: 1000; }
 dialog.fallback-dialog[open] { display: block; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); margin: 0; max-height: calc(100% - 32px); overflow-y: auto; z-index: 1001; }
 body.dialog-open { overflow: hidden; }
+
+.extra-username { display:flex; align-items:center; gap:12px; }
+.extra-username input { min-width:0; flex:1; }
+#add-username { margin:0 0 20px; min-height:44px; }
+#coverage-dialog { width:min(760px,calc(100% - 32px)); max-height:88vh; overflow-y:auto; }
+.coverage-item { padding:16px 0; border-bottom:1px solid var(--line); }
+.coverage-item h3 { font-size:16px; margin:0 0 8px; }
+.coverage-item p { margin:6px 0; }
+@media (max-width:900px) { .job-actions { flex-wrap:wrap; } }
+
+#check-dialog { max-height:calc(100% - 32px); overflow-y:auto; }
+#check-dialog .dialog-head, #coverage-dialog .dialog-head { position:sticky; top:0; background:#fff; z-index:2; }
+#check-dialog .dialog-head h2, #coverage-dialog .dialog-head h2 { margin:10px 0; }
