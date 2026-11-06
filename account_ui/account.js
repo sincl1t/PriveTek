@@ -1,5 +1,43 @@
 'use strict';
 const $ = id => document.getElementById(id);
+let fallbackDialog = null, dialogReturnFocus = null;
+const dialogBackdrop = document.createElement('div');
+dialogBackdrop.className = 'dialog-backdrop'; dialogBackdrop.hidden = true;
+dialogBackdrop.setAttribute('aria-hidden', 'true'); document.body.append(dialogBackdrop);
+function openDialog(id) {
+  const dialog = $(id);
+  if (typeof dialog.showModal === 'function') { dialog.showModal(); return; }
+  if (fallbackDialog) closeDialog(fallbackDialog.id);
+  dialogReturnFocus = document.activeElement; fallbackDialog = dialog;
+  dialog.classList.add('fallback-dialog'); dialog.setAttribute('open', '');
+  dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true');
+  dialogBackdrop.hidden = false; document.body.classList.add('dialog-open');
+  const first = dialog.querySelector('button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href]');
+  if (first) first.focus(); else { dialog.tabIndex = -1; dialog.focus(); }
+}
+function closeDialog(id) {
+  const dialog = $(id);
+  if (typeof dialog.close === 'function' && !dialog.classList.contains('fallback-dialog')) { dialog.close(); return; }
+  dialog.removeAttribute('open'); dialog.removeAttribute('aria-modal');
+  if (fallbackDialog !== dialog) return;
+  fallbackDialog = null; dialogBackdrop.hidden = true; document.body.classList.remove('dialog-open');
+  if (dialogReturnFocus && document.documentElement.contains(dialogReturnFocus)) dialogReturnFocus.focus();
+  dialogReturnFocus = null;
+}
+document.addEventListener('keydown', event => {
+  if (!fallbackDialog) return;
+  const dialog = fallbackDialog;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    if (dialog.dispatchEvent(new Event('cancel', {cancelable: true}))) closeDialog(dialog.id);
+  } else if (event.key === 'Tab') {
+    const focusable = Array.from(dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex="0"]')).filter(el => !el.closest('[hidden]'));
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (!first) { event.preventDefault(); dialog.focus(); }
+    else if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
+  }
+});
 let mfaChallenge = '';
 let mode = 'login', challenge = '', csrf = '', userEmail = '', offset = 0, loading = false, authBusy = false;
 const statusLabels = {accepted:'В очереди', searching:'Проверяем источники', generating_report:'Готовим отчёт', sending:'Отправляем письмо', provider_accepted:'Письмо принято сервисом', failed:'Проверка не завершена', delivery_unknown:'Доставка требует проверки'};
@@ -49,7 +87,7 @@ $('auth-form').onsubmit = async event => {
   } catch (error) { message('auth-message',error.message,true); }
   finally { authBusy=false; $('auth-submit').disabled=false; }
 };
-function signedOut(notice='') { clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').replaceChildren(); $('check-dialog').close(); switchMode('login',notice); }
+function signedOut(notice='') { clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode('login',notice); }
 async function openDashboard() {
   const ticket=++generation; let user;
   try { user = await api('me'); } catch(error) { if(ticket!==generation)return; throw error; }
@@ -63,7 +101,7 @@ function renderJob(job) {
   row.append(textEl('div','job-icon','PDF'));
   const details=textEl('div','',''); const stamp=new Date(job.created_at); const date=Number.isNaN(stamp.getTime()) ? 'Дата не указана' : new Intl.DateTimeFormat('ru-RU',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(stamp);
   details.append(textEl('h3','', 'Проверка цифрового следа'));
-  const meta=textEl('div','job-meta',''); meta.append(textEl('span','',date)); const pending=activeStatuses.has(job.status); hasActive ||= pending;
+  const meta=textEl('div','job-meta',''); meta.append(textEl('span','',date)); const pending=activeStatuses.has(job.status); hasActive = hasActive || pending;
   meta.append(textEl('span','badge'+(pending?' pending':['failed','delivery_unknown'].includes(job.status)?' failed':''),statusLabels[job.status]||'Статус уточняется')); details.append(meta); row.append(details);
   const actions=textEl('div','job-actions','');
   if (job.report_available) {
@@ -79,18 +117,18 @@ async function loadJobs(reset=false) {
   try {
     const nextOffset=reset?0:offset; const data=await api('jobs?offset='+nextOffset);
     if(ticket!==generation)return;
-    if(reset){$('jobs-list').replaceChildren(); hasActive=false;}
+    if(reset){$('jobs-list').textContent = ''; hasActive=false;}
     data.items.forEach(job=>{if(!/^[0-9a-f]{32}$/.test(job.id))return; if(!$('jobs-list').querySelector('[data-id="'+job.id+'"]')){const row=renderJob(job); if(row) $('jobs-list').append(row);}});
     offset=nextOffset+data.items.length; $('empty').hidden=offset>0; $('load-more').hidden=!data.has_more;
   }catch(error){if(ticket===generation)handleDashboardError(error);}finally{if(ticket===generation){loading=false; $('refresh').disabled=false; $('load-more').disabled=false;}}
 }
 $('refresh').onclick=()=>loadJobs(true); $('load-more').onclick=()=>loadJobs(false);
 $('logout').onclick=async()=>{ $('logout').disabled=true; try{await api('auth/logout',{method:'POST',body:'{}'}); signedOut('Вы вышли из кабинета.');}catch(error){handleDashboardError(error);}finally{$('logout').disabled=false;} };
-function openCheck(){message('check-message',''); $('check-dialog').showModal();}
-$('new-check').onclick=openCheck; $('empty-check').onclick=openCheck; $('close-check').onclick=()=>$('check-dialog').close();
+function openCheck(){message('check-message',''); openDialog('check-dialog');}
+$('new-check').onclick=openCheck; $('empty-check').onclick=openCheck; $('close-check').onclick=()=>closeDialog('check-dialog');
 $('check-form').onsubmit=async event=>{
   event.preventDefault(); $('check-submit').disabled=true; message('check-message','');
-  try{const data=await api('jobs',{method:'POST',body:JSON.stringify({username:$('username').value,phone:$('phone').value,consent:$('consent').checked})}); $('check-dialog').close(); $('check-form').reset(); $('check-email').value=userEmail; await loadJobs(true); message('dashboard-message',data.duplicate?'Эта проверка уже есть в истории.':'Проверка запущена. Статус обновится автоматически.');}
+  try{const data=await api('jobs',{method:'POST',body:JSON.stringify({username:$('username').value,phone:$('phone').value,consent:$('consent').checked})}); closeDialog('check-dialog'); $('check-form').reset(); $('check-email').value=userEmail; await loadJobs(true); message('dashboard-message',data.duplicate?'Эта проверка уже есть в истории.':'Проверка запущена. Статус обновится автоматически.');}
   catch(error){if(error.status===401)signedOut('Сессия завершилась. Войдите снова.');else message('check-message',error.message,true);}finally{$('check-submit').disabled=false;}
 };
 setInterval(()=>{if(!$('dashboard').hidden && !document.hidden && hasActive && offset<=20)loadJobs(true);},15000);
@@ -148,13 +186,13 @@ window.addEventListener('beforeunload',event=>{if(!$('mfa-recovery-codes').hidde
 let identityJob='', identitySnapshot=null, identityBusy=false, identityGeneration=0;
 function closeIdentity() {
   identityGeneration++; identityJob=''; identitySnapshot=null;
-  $('identity-items').replaceChildren(); $('identity-summary').textContent='';
-  $('identity-download').removeAttribute('href'); $('identity-dialog').close();
+  $('identity-items').textContent = ''; $('identity-summary').textContent='';
+  $('identity-download').removeAttribute('href'); closeDialog('identity-dialog');
 }
 function renderIdentity() {
   const snapshot=identitySnapshot; if(!snapshot)return;
   $('identity-summary').textContent='Моё: '+snapshot.summary.mine+'. Не моё: '+snapshot.summary.not_mine+'. Не проверено: '+snapshot.summary.unreviewed+'.';
-  $('identity-items').replaceChildren();
+  $('identity-items').textContent = '';
   const labels={}; snapshot.identifiers.forEach(item=>labels[item.id]=item.title);
   const groupOrder={mine:0,unreviewed:1,not_mine:2}; let lastGroup='';
   for(const item of [...snapshot.identifiers,...snapshot.findings].sort((a,b)=>groupOrder[a.decision]-groupOrder[b.decision])) {
@@ -173,7 +211,7 @@ function renderIdentity() {
 }
 async function openIdentity(jobId) {
   closeIdentity(); identityJob=jobId; const ticket=identityGeneration;
-  message('identity-message','Загружаем карточку…'); $('identity-dialog').showModal();
+  message('identity-message','Загружаем карточку…'); openDialog('identity-dialog');
   try {const snapshot=await api('jobs/'+jobId+'/identity');if(ticket!==identityGeneration)return;
     identitySnapshot=snapshot; $('identity-download').href='/api/account/jobs/'+jobId+'/identity/report';renderIdentity();message('identity-message','');
   } catch(error) {if(ticket===identityGeneration){if(error.status===401)signedOut('Сессия завершилась. Войдите снова.');else message('identity-message',error.message,true);}}
@@ -192,7 +230,7 @@ let monitorBusy=false, monitorSettings=null, monitorHistory=[], monitorOffset=0,
 const monitorLabels={completed:'Проверка выполнена',partial:'Часть источников недоступна',unavailable:'Проверка недоступна',running:'Проверяем',interrupted:'Проверка прервана',cancelled:'Отменена'};
 const monitorMailLabels={none:'Письмо не требуется',pending:'Уведомление в очереди',sending:'Отправка начата',provider_accepted:'Провайдер принял письмо',delivery_unknown:'Статус отправки не подтверждён',cancelled:'Уведомление отменено'};
 function monitorDate(value){if(!value)return 'ещё нет';const date=new Date(value);return Number.isNaN(date.getTime())?'неизвестно':new Intl.DateTimeFormat('ru-RU',{dateStyle:'short',timeStyle:'short'}).format(date);}
-function clearMonitor(){monitorSettings=null;monitorHistory=[];monitorOffset=0; $('monitor-form').reset();$('monitor-history').replaceChildren();$('monitor-exclusions').replaceChildren();$('monitor-dates').textContent='';}
+function clearMonitor(){monitorSettings=null;monitorHistory=[];monitorOffset=0; $('monitor-form').reset();$('monitor-history').textContent = '';$('monitor-exclusions').textContent = '';$('monitor-dates').textContent='';}
 function renderMonitor(data){
   const settings=data.settings;monitorSettings=settings;monitorAvailable=data.available;
   $('monitor-status').textContent={off:'Выключен',active:'Включён · раз в неделю',paused:'На паузе'}[settings.state]||'Статус неизвестен';
@@ -202,9 +240,9 @@ function renderMonitor(data){
   $('monitor-pause').hidden=settings.state!=='active';$('monitor-resume').hidden=settings.state!=='paused';$('monitor-resume').disabled=!data.available;
   $('monitor-delete').hidden=settings.state==='off';
   $('monitor-dates').textContent='Последняя проверка: '+monitorDate(settings.last_checked_at)+'. Следующая: '+(settings.state==='active'?monitorDate(settings.next_run_at):'не назначена')+'. Пилот до '+monitorDate(settings.pilot_ends_at)+'.';
-  $('monitor-exclusions').replaceChildren();
+  $('monitor-exclusions').textContent = '';
   if(settings.exclusions.length){$('monitor-exclusions').append(textEl('h3','','Исключения из уведомлений'));for(const item of settings.exclusions){const row=textEl('div','monitor-item',item.source+(item.breach_name?' · '+item.breach_name:''));const restore=textEl('button','text-button','Снова учитывать');restore.type='button';restore.onclick=()=>monitorReview(item.id,'restore');row.append(restore);$('monitor-exclusions').append(row);}}
-  $('monitor-history').replaceChildren();
+  $('monitor-history').textContent = '';
   if(!data.history.length){$('monitor-history').append(textEl('p','muted',settings.state==='off'?'Мониторинг включается только по вашему согласию.':'История появится после планового запуска.'));return;}
   $('monitor-history').append(textEl('h3','','История мониторинга'));
   for(const run of data.history){
