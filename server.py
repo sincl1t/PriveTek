@@ -8,7 +8,7 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from search_inputs import normalize_phone, normalize_username
+from search_inputs import normalize_phone, normalize_username, normalize_usernames
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -100,6 +100,12 @@ class Submission(BaseModel):
     Email: EmailStr = Field(max_length=254)
     Phone: str = Field(default='', max_length=40)
     Username: str = Field(default='', max_length=65)
+    AdditionalUsernames: list[str] = Field(default_factory=list, max_length=2)
+
+    @field_validator('AdditionalUsernames')
+    @classmethod
+    def validate_additional_usernames(cls, value):
+        return normalize_usernames(None, value)
 
     @field_validator('Email')
     @classmethod
@@ -207,7 +213,7 @@ async def start_submission(submission):
     except (ValueError, TypeError):
         raise HTTPException(503, 'Отправка почты ещё не настроена')
     try:
-        job_id, duplicate = guard.reserve(str(submission.Email), submission.Phone, submission.Username)
+        job_id, duplicate = guard.reserve(str(submission.Email), submission.Phone, '\0'.join(sorted(normalize_usernames(submission.Username, submission.AdditionalUsernames))))
     except Limited as limit:
         raise HTTPException(429, 'Лимит заявок. Повторите позже',
                             headers={'Retry-After': str(limit.retry_after)})
@@ -245,8 +251,10 @@ def background_task(submission, job_id):
     try:
         job_store.record(job_id, 'searching')
         import osint
-        results = osint.search(email=str(submission.Email), phone=submission.Phone or None,
-                               username=submission.Username or None)
+        search_options = dict(email=str(submission.Email), phone=submission.Phone or None, username=submission.Username or None)
+        if submission.AdditionalUsernames:
+            search_options['additional_usernames'] = submission.AdditionalUsernames
+        results = osint.search(**search_options)
         import analysis_layer, ai_summary
         results['analysis_selection'] = ai_summary.select(analysis_layer.analyze(results))
         if results.get('identity_resolution'):
@@ -292,9 +300,9 @@ async def account_submit(request: Request):
     if data.get('consent') is not True:
         raise HTTPException(422, 'Подтвердите согласие на проверку своих данных')
     try:
-        submission = Submission(Email=user['email'], Phone=data.get('phone', ''), Username=data.get('username', ''))
+        submission = Submission(Email=user['email'], Phone=data.get('phone', ''), Username=data.get('username', ''), AdditionalUsernames=data.get('additional_usernames', []))
     except (ValidationError, TypeError):
-        raise HTTPException(422, 'Проверьте формат телефона и username') from None
+        raise HTTPException(422, 'Проверьте телефон с кодом страны и username без ссылок: до 64 латинских букв, цифр, точек, дефисов и подчёркиваний. Дополнительных username — не более двух.') from None
     response = await start_submission(submission)
     if response.headers.get('X-Duplicate') != 'true':
         await run_in_threadpool(acquisition.safe, acquisition.associate_job, request, response.headers['X-Request-ID'])

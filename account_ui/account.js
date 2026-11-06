@@ -96,7 +96,7 @@ $('auth-form').onsubmit = async event => {
   } catch (error) { message('auth-message',error.message,true); }
   finally { authBusy=false; $('auth-submit').disabled=false; }
 };
-function signedOut(notice='') { trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode('login',notice); }
+function signedOut(notice='') { closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode('login',notice); }
 async function openDashboard() {
   const ticket=++generation; let user;
   try { user = await api('me'); } catch(error) { if(ticket!==generation)return; throw error; }
@@ -117,6 +117,7 @@ function renderJob(job) {
     const link=textEl('a','button secondary','Скачать PDF ↓'); link.href='/api/account/jobs/'+job.id+'/report'; link.setAttribute('download','PriveTek-report.pdf'); actions.append(link);
     const remove=textEl('button','text-button','Удалить'); remove.type='button'; remove.onclick=async()=>{ if(!confirm('Удалить сохранённую копию отчёта из кабинета? Письмо с отчётом останется у вас.')) return; remove.disabled=true; try {await api('jobs/'+job.id+'/report',{method:'DELETE'}); await loadJobs(true);} catch(error){handleDashboardError(error); remove.disabled=false;} }; actions.append(remove);
   } else actions.append(textEl('span','report-unavailable',pending?'Отчёт готовится':'PDF недоступен'));
+  if(job.identity_available) { const coverage=textEl('button','button secondary','Что проверено'); coverage.type='button'; coverage.onclick=()=>openCoverage(job.id); actions.append(coverage); }
   if(job.identity_available) { const review=textEl('button','button secondary','Связи и принадлежность'); review.type='button'; review.onclick=()=>openIdentity(job.id); actions.append(review); }
   row.append(actions); return row;
 }
@@ -133,11 +134,11 @@ async function loadJobs(reset=false) {
 }
 $('refresh').onclick=()=>loadJobs(true); $('load-more').onclick=()=>loadJobs(false);
 $('logout').onclick=async()=>{ $('logout').disabled=true; try{await api('auth/logout',{method:'POST',body:'{}'}); signedOut('Вы вышли из кабинета.');}catch(error){handleDashboardError(error);}finally{$('logout').disabled=false;} };
-function openCheck(){trackEvent('report_form_open'); message('check-message',''); openDialog('check-dialog');}
+function openCheck(){trackEvent('report_form_open'); message('check-message',''); openDialog('check-dialog'); $('check-dialog').scrollTop=0;}
 $('new-check').onclick=openCheck; $('empty-check').onclick=openCheck; $('close-check').onclick=()=>closeDialog('check-dialog');
 $('check-form').onsubmit=async event=>{
-  event.preventDefault(); $('check-submit').disabled=true; message('check-message','');
-  try{const data=await api('jobs',{method:'POST',body:JSON.stringify({username:$('username').value,phone:$('phone').value,consent:$('consent').checked})}); closeDialog('check-dialog'); $('check-form').reset(); $('check-email').value=userEmail; await loadJobs(true); message('dashboard-message',data.duplicate?'Эта проверка уже есть в истории.':'Проверка запущена. Статус обновится автоматически.');}
+  event.preventDefault(); if (!validateCheckForm()) { $('check-form').reportValidity(); return; } $('check-submit').disabled=true; message('check-message','');
+  try{const data=await api('jobs',{method:'POST',body:JSON.stringify(checkPayload())}); closeDialog('check-dialog'); $('check-form').reset(); resetExtraUsernames(); $('check-email').value=userEmail; await loadJobs(true); message('dashboard-message',data.duplicate?'Эта проверка уже есть в истории.':'Проверка запущена. Статус обновится автоматически.');}
   catch(error){if(error.status===401)signedOut('Сессия завершилась. Войдите снова.');else message('check-message',error.message,true);}finally{$('check-submit').disabled=false;}
 };
 setInterval(()=>{if(!$('dashboard').hidden && !document.hidden && hasActive && offset<=20)loadJobs(true);},15000);
@@ -285,4 +286,65 @@ async function monitorChange(action){
 async function monitorReview(itemId,action){if(monitorBusy)return;monitorBusy=true;const ticket=generation;try{await api('monitor/exclusions',{method:'POST',body:JSON.stringify({item_id:itemId,action})});if(ticket===generation){await loadMonitor();message('monitor-message','Настройка уведомлений сохранена.');}}catch(error){if(ticket===generation)message('monitor-message',error.message,true);}finally{monitorBusy=false;}}
 $('monitor-form').onsubmit=event=>{event.preventDefault();monitorChange('enable');};
 $('monitor-pause').onclick=()=>monitorChange('pause');$('monitor-resume').onclick=()=>monitorChange('resume');$('monitor-delete').onclick=()=>monitorChange('delete');$('monitor-refresh').onclick=()=>loadMonitor();$('monitor-load-more').onclick=()=>loadMonitor(false);
+function usernameFields() { return [$('username'), $('username-extra-1'), $('username-extra-2')]; }
+function resetExtraUsernames() {
+  for (const index of [1,2]) { $('username-extra-'+index).value=''; $('username-extra-'+index).setCustomValidity(''); $('username-extra-row-'+index).hidden=true; }
+  $('username').setCustomValidity(''); $('phone').setCustomValidity(''); $('add-username').hidden=false; $('username-duplicates').hidden=true;
+}
+$('add-username').onclick=()=>{
+  for (const index of [1,2]) { const row=$('username-extra-row-'+index); if(row.hidden) { row.hidden=false; $('username-extra-'+index).focus(); break; } }
+  $('add-username').hidden=[1,2].every(index=>!$('username-extra-row-'+index).hidden);
+};
+for (const index of [1,2]) $('remove-username-'+index).onclick=()=>{
+  $('username-extra-'+index).value=''; $('username-extra-'+index).setCustomValidity(''); $('username-extra-row-'+index).hidden=true; $('add-username').hidden=false; $('add-username').focus(); checkPayload();
+};
+function validateCheckForm() {
+  let valid=true;
+  for(const field of usernameFields()) {
+    const name=field.value.trim().replace(/^@/,'');
+    const error=name && !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name) ? 'Введите имя без ссылки: до 64 латинских букв, цифр, точек, дефисов и подчёркиваний.' : '';
+    field.setCustomValidity(error); if(error)valid=false;
+  }
+  const phone=$('phone').value.trim(), digits=phone.replace(/\D/g,'');
+  const error=phone && (!/^\+[0-9\s().-]+$/.test(phone) || digits.length<7 || digits.length>15) ? 'Укажите номер с кодом страны, например +7 912 345-67-89.' : '';
+  $('phone').setCustomValidity(error); return valid && !error;
+}
+for(const field of [...usernameFields(),$('phone')]) field.addEventListener('input',()=>{validateCheckForm();checkPayload();});
+function checkPayload() {
+  const seen=new Set(), names=[]; let duplicates=0;
+  for(const field of usernameFields()) {
+    const name=field.value.trim().replace(/^@/,'');
+    if(!name)continue;
+    if(seen.has(name)) { duplicates++; continue; }
+    seen.add(name); names.push(name);
+  }
+  $('username-duplicates').textContent=duplicates ? 'Повторяющиеся username проверяются один раз.' : '';
+  $('username-duplicates').hidden=!duplicates;
+  return {username:names[0]||'', additional_usernames:names.slice(1), phone:$('phone').value.trim(), consent:$('consent').checked};
+}
+let coverageGeneration=0;
+function closeCoverage() { coverageGeneration++; closeDialog('coverage-dialog'); $('coverage-content').textContent=''; message('coverage-message',''); }
+$('close-coverage').onclick=closeCoverage;
+$('coverage-dialog').addEventListener('cancel',event=>{event.preventDefault();closeCoverage();});
+async function openCoverage(jobId) {
+  closeCoverage(); const ticket=coverageGeneration; openDialog('coverage-dialog'); $('coverage-dialog').scrollTop=0; message('coverage-message','Загружаем результаты…');
+  try {
+    const snapshot=await api('jobs/'+jobId+'/identity'); if(ticket!==coverageGeneration)return;
+    const coverage=snapshot.coverage;
+    if(!coverage || !Array.isArray(coverage.entries)) { message('coverage-message','Для этого отчёта детализация доступна только в исходном PDF.'); return; }
+    const groups={completed:'Выполнено',inconclusive:'Ответ неопределённый',skipped:'Пропущено',unavailable:'Недоступно',disabled:'Отключено'};
+    $('coverage-content').append(textEl('p','',Object.entries(groups).map(([key,label])=>label+': '+(coverage.counts[key]||0)).join(' · ')));
+    const states={found:'Найдены сведения',possible:'Косвенный признак — требует проверки',not_found:'Находок в источнике нет',unknown:'Ответ неопределённый',skipped:'Пропущено',unavailable:'Недоступно',disabled:'Отключено'};
+    const kinds={email:'email',phone:'телефон',username:'username',breach:'утечки по email',avatar:'аватар по email'};
+    for(const check of coverage.entries) {
+      const item=textEl('div','coverage-item','');
+      item.append(textEl('h3','',check.source+' · '+(kinds[check.kind]||'проверка')+(check.query_username?' · '+check.query_username:'')));
+      item.append(textEl('p','',states[check.status]||'Ответ неопределённый'));
+      if(check.reason)item.append(textEl('p','small',check.reason));
+      $('coverage-content').append(item);
+    }
+    if(coverage.omitted)$('coverage-content').append(textEl('p','small','Часть проверок показана только в PDF.'));
+    message('coverage-message','');
+  }catch(error){ if(ticket!==coverageGeneration)return; if(error.status===401)signedOut('Сессия завершилась. Войдите снова.');else message('coverage-message',error.message,true); }
+}
 openDashboard().catch(error=>{signedOut(); if(error.status!==401)message('auth-message',error.message,true);});

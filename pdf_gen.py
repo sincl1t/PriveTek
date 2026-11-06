@@ -195,6 +195,8 @@ def create_report(data, output_dir=None):
                 accent = CYAN if status == 'found' else (205, 150, 51) if status == 'possible' else (182, 194, 208)
                 lines = [(f"{check['source']}: {labels.get(status, 'Неопределённый результат')}", 11, NAVY, '', 6),
                          (check.get('reason', ''), 10, INK, '', 5.3)]
+                if check.get('query_username'):
+                    lines.append(('Проверялся username: ' + check['query_username'], 9, MUTED, '', 4.8))
                 if check.get('profile_url'):
                     url = check['profile_url']
                     lines.append(('Профиль: ' + url, 9, (0, 122, 150), url, 4.8))

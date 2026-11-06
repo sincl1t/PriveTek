@@ -4,6 +4,8 @@ import phonenumbers
 
 
 def normalize_phone(value):
+    if value is not None and not isinstance(value, str):
+        raise ValueError('Ожидается текстовое значение')
     value = (value or '').strip()
     if not value:
         return ''
@@ -19,9 +21,24 @@ def normalize_phone(value):
 
 
 def normalize_username(value):
+    if value is not None and not isinstance(value, str):
+        raise ValueError('Ожидается текстовое значение')
     value = (value or '').strip().removeprefix('@')
     if not value:
         return ''
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', value):
         raise ValueError('Username: 1–64 латинских букв, цифр, точек, дефисов или подчёркиваний; без URL')
     return value
+
+
+def normalize_usernames(primary=None, additional=None):
+    if additional is None:
+        additional = []
+    if not isinstance(additional, list) or len(additional) > 2:
+        raise ValueError('Можно добавить не более двух дополнительных username')
+    result, seen = [], set()
+    for value in [primary, *additional]:
+        normalized = normalize_username(value)
+        if normalized and normalized not in seen:
+            seen.add(normalized); result.append(normalized)
+    return result
