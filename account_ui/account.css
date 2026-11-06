@@ -210,3 +210,4 @@ body.dialog-open { overflow: hidden; }
 
 .has-draft .auth-layout {grid-template-columns:minmax(0,1fr);min-height:0;padding:20px 0 48px;}
 .has-draft .intro {display:none;}.has-draft .auth-card {width:100%;max-width:520px;margin:0 auto;}
+.draft-banner a, .guest-start a {color:var(--ink);}.tabs a {min-height:44px;display:inline-flex;align-items:center;}
