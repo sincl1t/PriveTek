@@ -25,6 +25,7 @@ import account_crypto
 import discovery
 from account_routes import router as account_router
 from monitor_routes import router as monitor_router
+from guest_order import router as guest_router
 from submission_guard import SubmissionGuard, Limited
 from privacy_logging import configure_logging
 
@@ -64,6 +65,7 @@ async def account_cleanup_loop():
 app = FastAPI(lifespan=lifespan)
 app.include_router(account_router)
 app.include_router(monitor_router)
+app.include_router(guest_router)
 
 
 @app.middleware("http")
@@ -76,7 +78,7 @@ async def protect_account_responses(request, call_next):
             raise
         response = JSONResponse({"detail": "Кабинет временно недоступен. Попробуйте позже"}, status_code=503)
     if private and acquisition.enabled():
-        if request.method == 'GET' and request.url.path in ('/account', '/go'):
+        if request.method == 'GET' and request.url.path in ('/account', '/account/login', '/account/register', '/go'):
             value = await run_in_threadpool(acquisition.safe, acquisition.visit, request)
             if value:
                 response.set_cookie(acquisition.COOKIE, value, max_age=30*86400, secure=True, httponly=True, samesite='lax', path='/')
@@ -198,6 +200,8 @@ async def receive(request: Request):
     # Authenticate the Tilda probe too; it must never start a job or consume quota.
     if list(form.multi_items()) == [('test', 'test')]:
         return PlainTextResponse('ok')
+    if account_crypto.enabled():
+        raise HTTPException(409, 'Подтвердите email и продолжите в личном кабинете: https://lk.privetek.ru/account/start')
     try:
         submission = Submission.model_validate(dict(form))
     except ValidationError as error:
@@ -299,14 +303,18 @@ async def account_submit(request: Request):
     user, _ = await run_in_threadpool(identify, request, True)
     if data.get('consent') is not True:
         raise HTTPException(422, 'Подтвердите согласие на проверку своих данных')
+    import guest_order
+    draft=guest_order.for_order(request,data,user)
     try:
-        submission = Submission(Email=user['email'], Phone=data.get('phone', ''), Username=data.get('username', ''), AdditionalUsernames=data.get('additional_usernames', []))
+        submission = Submission(Name=draft['name'] if draft else data.get('name',''), Email=user['email'], Phone=data.get('phone', ''), Username=data.get('username', ''), AdditionalUsernames=data.get('additional_usernames', []))
     except (ValidationError, TypeError):
         raise HTTPException(422, 'Проверьте телефон с кодом страны и username без ссылок: до 64 латинских букв, цифр, точек, дефисов и подчёркиваний. Дополнительных username — не более двух.') from None
     response = await start_submission(submission)
     if response.headers.get('X-Duplicate') != 'true':
         await run_in_threadpool(acquisition.safe, acquisition.associate_job, request, response.headers['X-Request-ID'])
-    return result(dict(job_id=response.headers['X-Request-ID'], duplicate=response.headers.get('X-Duplicate') == 'true'), 202)
+    output=result(dict(job_id=response.headers['X-Request-ID'], duplicate=response.headers.get('X-Duplicate') == 'true'), 202)
+    if draft:guest_order.clear(output)
+    return output
 
 
 def monitor_authorize(request):

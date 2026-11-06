@@ -47,6 +47,7 @@ let registrationStarted = false;
 $('auth-form').addEventListener('input', () => {
   if (mode === 'register' && !registrationStarted) { registrationStarted = true; trackEvent('registration_start'); }
 });
+let pendingDraft=null, draftInForm=null, draftOffered=false;
 let mfaChallenge = '';
 let mode = 'login', challenge = '', csrf = '', userEmail = '', offset = 0, loading = false, authBusy = false;
 const statusLabels = {accepted:'В очереди', searching:'Проверяем источники', generating_report:'Готовим отчёт', sending:'Отправляем письмо', provider_accepted:'Письмо принято сервисом', failed:'Проверка не завершена', delivery_unknown:'Доставка требует проверки'};
@@ -60,10 +61,12 @@ async function api(path, options = {}) {
   return data;
 }
 function switchMode(next, notice = '') {
-  mode = next; message('auth-message',notice); $('auth-tabs').hidden = !['login','register'].includes(mode);
-  $('login-tab').classList.toggle('active',mode==='login'); $('login-tab').setAttribute('aria-selected',String(mode==='login'));
-  $('register-tab').classList.toggle('active',mode==='register'); $('register-tab').setAttribute('aria-selected',String(mode==='register'));
-  const config = {login:['С возвращением','Войдите, чтобы открыть ваши проверки.','Войти в кабинет →'],register:['Начните с себя','Создайте кабинет для ваших проверок.','Создать кабинет →'],verify:['Подтвердите email','Введите код из письма. Он действует 10 минут.','Подтвердить email →'],forgot:['Восстановить доступ','Укажите email, использованный при регистрации.','Получить код →'],mfa:['Подтвердите вход','Введите код приложения или одноразовый резервный код.','Подтвердить вход →'],reset:['Новый пароль','Введите код из письма и придумайте новый пароль.','Сохранить пароль →']}[mode];
+  mode = next;
+  if(['login','register'].includes(mode)) history.replaceState(null,'', '/account/'+mode);
+  message('auth-message',notice); $('auth-tabs').hidden = !['login','register'].includes(mode);
+  $('login-tab').classList.toggle('active',mode==='login'); $('login-tab').setAttribute('aria-current',mode==='login'?'page':'false');
+  $('register-tab').classList.toggle('active',mode==='register'); $('register-tab').setAttribute('aria-current',mode==='register'?'page':'false');
+  const config = {login:['С возвращением','Войдите, чтобы открыть ваши проверки.','Войти в кабинет →'],register:['Создать аккаунт','Подтвердите email, чтобы получать отчёты в личном кабинете.','Создать аккаунт →'],verify:['Подтвердите email','Введите код из письма. Он действует 10 минут.','Подтвердить email →'],forgot:['Восстановить доступ','Укажите email, использованный при регистрации.','Получить код →'],mfa:['Подтвердите вход','Введите код приложения или одноразовый резервный код.','Подтвердить вход →'],reset:['Новый пароль','Введите код из письма и придумайте новый пароль.','Сохранить пароль →']}[mode];
   $('auth-title').textContent = config[0]; $('auth-caption').textContent = config[1]; $('auth-submit').textContent = config[2];
   $('email-field').hidden = ['verify','reset','mfa'].includes(mode); $('email').required = !['verify','reset','mfa'].includes(mode);
   $('password-field').hidden = ['verify','forgot','mfa'].includes(mode); $('password').required = !['verify','forgot','mfa'].includes(mode);
@@ -75,8 +78,8 @@ function switchMode(next, notice = '') {
   $('forgot').hidden = mode !== 'login'; $('back-login').hidden = ['login','register'].includes(mode);
   $('auth-note').textContent = mode === 'mfa' ? 'Потеряли телефон? Используйте один из сохранённых резервных кодов. Сброс пароля не отключает 2FA.' : ['verify','reset'].includes(mode) ? 'Не пришло письмо? Проверьте «Спам». Для нового кода вернитесь и повторите запрос.' : 'При регистрации нужно подтвердить email кодом из письма.';
 }
-$('login-tab').onclick = () => { if (!authBusy) switchMode('login'); };
-$('register-tab').onclick = () => { if (!authBusy) switchMode('register'); };
+$('login-tab').onclick = event => { event.preventDefault(); if (!authBusy) switchMode('login'); };
+$('register-tab').onclick = event => { event.preventDefault(); if (!authBusy) switchMode('register'); };
 $('forgot').onclick = () => { if (!authBusy) switchMode('forgot'); };
 $('back-login').onclick = () => { if (!authBusy) switchMode('login'); };
 $('show-password').onclick = () => { const hidden = $('password').type === 'password'; $('password').type = hidden ? 'text' : 'password'; $('show-password').textContent = hidden ? 'Скрыть' : 'Показать'; $('show-password').setAttribute('aria-label',hidden ? 'Скрыть пароль' : 'Показать пароль'); };
@@ -96,12 +99,13 @@ $('auth-form').onsubmit = async event => {
   } catch (error) { message('auth-message',error.message,true); }
   finally { authBusy=false; $('auth-submit').disabled=false; }
 };
-function signedOut(notice='') { closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode('login',notice); }
+function signedOut(notice='') { closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode(location.pathname==='/account/register'?'register':'login',notice); updateDraftNotice(); }
 async function openDashboard() {
   const ticket=++generation; let user;
   try { user = await api('me'); } catch(error) { if(ticket!==generation)return; throw error; }
   if(ticket!==generation)return; loading=false; csrf=user.csrf_token; userEmail=user.email;
-  $('account-email').textContent=userEmail; $('check-email').value=userEmail; $('auth-view').hidden=true; $('dashboard').hidden=false; $('logout').hidden=false; offset=0; await Promise.all([loadJobs(true), loadSecurity(), loadMonitor()]);
+  $('account-email').textContent=userEmail; $('check-email').value=userEmail; $('auth-view').hidden=true; $('dashboard').hidden=false; $('logout').hidden=false; offset=0; await Promise.all([loadJobs(true), loadSecurity(), loadMonitor()]); updateDraftNotice();
+  if(pendingDraft && userEmail.toLowerCase()===pendingDraft.email.toLowerCase() && !draftOffered) {draftOffered=true; openDraftCheck();}
 }
 function textEl(tag, cls, text) { const el=document.createElement(tag); el.className=cls; el.textContent=text; return el; }
 function renderJob(job) {
@@ -134,11 +138,11 @@ async function loadJobs(reset=false) {
 }
 $('refresh').onclick=()=>loadJobs(true); $('load-more').onclick=()=>loadJobs(false);
 $('logout').onclick=async()=>{ $('logout').disabled=true; try{await api('auth/logout',{method:'POST',body:'{}'}); signedOut('Вы вышли из кабинета.');}catch(error){handleDashboardError(error);}finally{$('logout').disabled=false;} };
-function openCheck(){trackEvent('report_form_open'); message('check-message',''); openDialog('check-dialog'); $('check-dialog').scrollTop=0;}
+function openCheck(){draftInForm=null; trackEvent('report_form_open'); message('check-message',''); openDialog('check-dialog'); $('check-dialog').scrollTop=0;}
 $('new-check').onclick=openCheck; $('empty-check').onclick=openCheck; $('close-check').onclick=()=>closeDialog('check-dialog');
 $('check-form').onsubmit=async event=>{
   event.preventDefault(); if (!validateCheckForm()) { $('check-form').reportValidity(); return; } $('check-submit').disabled=true; message('check-message','');
-  try{const data=await api('jobs',{method:'POST',body:JSON.stringify(checkPayload())}); closeDialog('check-dialog'); $('check-form').reset(); resetExtraUsernames(); $('check-email').value=userEmail; await loadJobs(true); message('dashboard-message',data.duplicate?'Эта проверка уже есть в истории.':'Проверка запущена. Статус обновится автоматически.');}
+  try{const data=await api('jobs',{method:'POST',body:JSON.stringify(checkPayload())}); closeDialog('check-dialog'); if(draftInForm) {pendingDraft=null; draftInForm=null; updateDraftNotice();} $('check-form').reset(); resetExtraUsernames(); $('check-email').value=userEmail; await loadJobs(true); message('dashboard-message',data.duplicate?'Эта проверка уже есть в истории.':'Проверка запущена. Статус обновится автоматически.');}
   catch(error){if(error.status===401)signedOut('Сессия завершилась. Войдите снова.');else message('check-message',error.message,true);}finally{$('check-submit').disabled=false;}
 };
 setInterval(()=>{if(!$('dashboard').hidden && !document.hidden && hasActive && offset<=20)loadJobs(true);},15000);
@@ -320,7 +324,9 @@ function checkPayload() {
   }
   $('username-duplicates').textContent=duplicates ? 'Повторяющиеся username проверяются один раз.' : '';
   $('username-duplicates').hidden=!duplicates;
-  return {username:names[0]||'', additional_usernames:names.slice(1), phone:$('phone').value.trim(), consent:$('consent').checked};
+  const payload={username:names[0]||'', additional_usernames:names.slice(1), phone:$('phone').value.trim(), consent:$('consent').checked};
+  if(draftInForm)payload.draft_id=draftInForm.id;
+  return payload;
 }
 let coverageGeneration=0;
 function closeCoverage() { coverageGeneration++; closeDialog('coverage-dialog'); $('coverage-content').textContent=''; message('coverage-message',''); }
@@ -347,4 +353,29 @@ async function openCoverage(jobId) {
     message('coverage-message','');
   }catch(error){ if(ticket!==coverageGeneration)return; if(error.status===401)signedOut('Сессия завершилась. Войдите снова.');else message('coverage-message',error.message,true); }
 }
-openDashboard().catch(error=>{signedOut(); if(error.status!==401)message('auth-message',error.message,true);});
+function updateDraftNotice() {
+  document.body.classList.toggle('has-draft',!!pendingDraft);
+  $('draft-banner').hidden=!pendingDraft; if(!pendingDraft){$('draft-notice').textContent='';return;}
+  const same=userEmail && userEmail.toLowerCase()===pendingDraft.email.toLowerCase();
+  $('draft-notice').textContent=userEmail && !same ? 'Заявка подготовлена для другого email. Выйдите и войдите с email заявки либо измените данные. Поиск ещё не запущен.' : 'Данные сохранены на один час'+(pendingDraft.name?' · '+pendingDraft.name:'')+'. '+(userEmail?'Проверьте поля и подтвердите запуск.':'Подтвердите email при создании аккаунта или войдите, если аккаунт уже есть. Поиск ещё не запущен.');
+  $('continue-draft').hidden=!same;
+}
+function openDraftCheck() {
+  if(!pendingDraft || userEmail.toLowerCase()!==pendingDraft.email.toLowerCase())return;
+  $('check-form').reset(); resetExtraUsernames(); openCheck(); draftInForm=pendingDraft;
+  $('check-email').value=userEmail; $('username').value=pendingDraft.username; $('phone').value=pendingDraft.phone;
+  pendingDraft.additional_usernames.forEach((name,index)=>{$('username-extra-row-'+(index+1)).hidden=false;$('username-extra-'+(index+1)).value=name;});
+  $('add-username').hidden=pendingDraft.additional_usernames.length===2; validateCheckForm(); checkPayload();
+}
+$('continue-draft').onclick=openDraftCheck;
+$('discard-draft').onclick=async()=>{
+  try {await api('draft',{method:'DELETE'});if(draftInForm){$('check-form').reset();resetExtraUsernames();$('check-email').value=userEmail;} pendingDraft=null;draftInForm=null; $('email').readOnly=false;if(!userEmail)$('email').value='';updateDraftNotice();}
+  catch(error){message('draft-notice',error.message,true);}
+};
+async function bootstrap() {
+  try {const data=await api('draft');pendingDraft=data.draft;}catch(error){pendingDraft=null;}
+  if(pendingDraft){$('email').value=pendingDraft.email;$('email').readOnly=true;}
+  const entry=location.pathname==='/account/register'?'register':'login';
+  try {await openDashboard();} catch(error) {switchMode(entry);signedOut();if(error.status!==401)message('auth-message',error.message,true);}
+}
+bootstrap();

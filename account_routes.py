@@ -281,6 +281,8 @@ def remove_report(job_id: str, request: Request):
     return result(dict(message='Копия отчёта удалена из кабинета'))
 
 
+@router.get('/account/login', include_in_schema=False)
+@router.get('/account/register', include_in_schema=False)
 @router.get('/account', include_in_schema=False)
 def page():
     if not crypto.enabled():
@@ -290,7 +292,7 @@ def page():
 
 @router.get('/account/assets/{name}', include_in_schema=False)
 def asset(name: str):
-    allowed = {'account.css': 'text/css', 'account.js': 'application/javascript',
+    allowed = {'start.js':'application/javascript', 'landing-handoff.js':'application/javascript', 'account.css': 'text/css', 'account.js': 'application/javascript',
                'brand-logo.png': 'image/png', 'brand-background.jpg': 'image/jpeg',
                'tildasans.woff2': 'font/woff2'}
     if name not in allowed:
