@@ -170,12 +170,12 @@ def summary(days):
             GROUP BY v.source,v.medium,v.campaign,e.kind,e.error_code ORDER BY 1,2,3,4''', (days,)).fetchall()
         accounts = db.execute('''SELECT u.id AS account_id, count(DISTINCT o.job_id) FILTER (WHERE o.created_at >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')) AS ordered,
             count(DISTINCT o.job_id) AS ordered_total,
-            count(DISTINCT ready.job_id) AS ready_observed,
-            count(DISTINCT downloaded.job_id) AS report_responses_observed
+            count(DISTINCT ready.job_id) FILTER (WHERE ready.created_at >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')) AS ready_observed,
+            count(DISTINCT downloaded.job_id) FILTER (WHERE downloaded.created_at >= CURRENT_TIMESTAMP - (%s * INTERVAL '1 day')) AS report_responses_observed
             FROM privetek_users u LEFT JOIN privetek_job_owners o ON o.email_key=u.email_key
             LEFT JOIN privetek_analytics_events ready ON ready.dedup_key='report_ready:'||o.job_id
             LEFT JOIN privetek_analytics_events downloaded ON downloaded.dedup_key='report_response:'||o.job_id||':'||u.id
-            GROUP BY u.id ORDER BY ordered DESC,u.id LIMIT 1001''', (days,)).fetchall()
+            GROUP BY u.id ORDER BY ordered DESC,u.id LIMIT 1001''', (days,days,days)).fetchall()
         since = db.execute("SELECT applied_at FROM privetek_schema_migrations WHERE version='007_acquisition_analytics.sql'").fetchone()
     return dict(days=days, tracking_since=since['applied_at'] if since else None, channels=channels,
                 accounts=accounts[:1000], accounts_truncated=len(accounts)>1000,

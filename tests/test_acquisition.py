@@ -80,6 +80,12 @@ def test_db_first_touch_registration_jobs_ready_and_download(db,monkeypatch,tmp_
     counts={row['kind']:row['events'] for row in result['channels'] if row['source']=='vk'}
     assert counts=={'visit':1,'landing':2,'registration_start':1,'contact_verified':1,'registered':1,'report_ordered':2,'report_ready':1,'report_response':1}
     assert result['accounts']==[{'account_id':user['id'],'ordered':2,'ordered_total':2,'ready_observed':1,'report_responses_observed':1}]
+    with job_store.connect() as connection:
+        connection.execute("UPDATE privetek_analytics_events SET created_at=CURRENT_TIMESTAMP-INTERVAL '31 days' WHERE kind='report_ready'")
+        a.transaction_event(connection, lambda db: db.execute('SELECT 1/0'))
+        assert connection.execute('SELECT 1 AS healthy').fetchone()['healthy']==1
+    assert a.summary(1)['accounts'][0]['ready_observed']==0
+    assert a.summary(1)['accounts'][0]['ordered_total']==2
     assert c.post('/api/account/auth/verify',json={'challenge_id':'a'*48,'code':'12345678'}).status_code==400
     assert any(row['kind']=='error_verification' for row in a.summary(30)['channels'])
     with job_store.connect() as connection:
