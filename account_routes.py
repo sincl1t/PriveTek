@@ -328,7 +328,8 @@ def identity_read(job_id: str, request: Request):
     snapshot = store.identity_snapshot(user['email_key'], job_id)
     if snapshot is None:
         raise HTTPException(404, 'Карточка недоступна: старая проверка, истёк срок или отчёт удалён')
-    return result(snapshot)
+    import breach_catalogue
+    return result(breach_catalogue.decorate(snapshot))
 
 
 def identity_update(data, request, job_id):

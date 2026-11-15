@@ -235,6 +235,22 @@ function renderIdentity() {
     row.append(label);
     if(item.identifier_id) row.append(textEl('p','small','Найдено по '+(labels[item.identifier_id]||'идентификатору')+'. '+(item.evidence==='indirect_signal'?'Косвенный признак регистрации.':'Совпадение источника не подтверждает владельца.')));
     if(item.profile_url) {const link=textEl('a','identity-profile','Открыть профиль ↗');link.href=item.profile_url;link.target='_blank';link.rel='noopener noreferrer';row.append(link);}
+    for (const entry of item.catalogue || []) {
+      const metadata = textEl('p', 'small', (entry.title || entry.name) + ' · ');
+      const source = textEl('a', '', entry.source);
+      source.href = entry.source_url; source.target = '_blank'; source.rel = 'noopener noreferrer';
+      metadata.append(source);
+      if (entry.status === 'available') {
+        metadata.append(' · Дата утечки: ' + entry.breach_date + ' · Обновлено: ' + new Date(entry.refreshed_at).toLocaleString('ru-RU'));
+        const license = textEl('a', '', 'CC BY 4.0');
+        license.href = entry.license_url; license.target = '_blank'; license.rel = 'noopener noreferrer';
+        metadata.append(' · ', license);
+      } else {
+        metadata.append(entry.status === 'not_found' ? ' · Записи сейчас нет в публичном каталоге.' : ' · Метаданные сейчас недоступны.');
+      }
+      row.append(metadata);
+    }
+    if (item.catalogue_omitted) row.append(textEl('p', 'small', 'Другие найденные утечки перечислены в исходном PDF.'));
     row.append(select); $('identity-items').append(row);
   }
   if(snapshot.omitted) $('identity-items').append(textEl('p','small','Часть находок не включена из-за ограничения размера. Смотрите исходный PDF.'));
@@ -250,7 +266,16 @@ async function saveIdentity(itemId,decision) {
   if(identityBusy||!identitySnapshot)return;identityBusy=true;const ticket=identityGeneration;
   $('identity-items').querySelectorAll('select').forEach(el=>el.disabled=true);message('identity-message','Сохраняем отметку…');
   try {const snapshot=await api('jobs/'+identityJob+'/identity',{method:'PUT',body:JSON.stringify({revision:identitySnapshot.revision,item_id:itemId,decision})});
-    if(ticket!==identityGeneration)return;identitySnapshot=snapshot;message('identity-message','Отметка сохранена. Принадлежность указана вами.');
+    if(ticket!==identityGeneration)return;
+    const previous = new Map(identitySnapshot.findings.map(item => [item.id, item]));
+    for (const item of snapshot.findings) {
+      const old = previous.get(item.id);
+      if (old && old.catalogue) {
+        item.catalogue = old.catalogue;
+        item.catalogue_omitted = old.catalogue_omitted;
+      }
+    }
+    identitySnapshot=snapshot;message('identity-message','Отметка сохранена. Принадлежность указана вами.');
   } catch(error) {if(ticket===identityGeneration){if(error.status===401)signedOut('Сессия завершилась. Войдите снова.');else message('identity-message',error.message,true);}}
   finally {identityBusy=false;if(ticket===identityGeneration)renderIdentity();}
 }

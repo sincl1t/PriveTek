@@ -16,6 +16,10 @@ TTL = timedelta(hours=24)
 SAMPLE = ('Adobe', 'Dropbox', 'LinkedIn')
 
 
+def valid_name(name):
+    return isinstance(name, str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,99}', name) is not None
+
+
 def fetch(client, name):
     url = SOURCE + 'api/v3/breach/' + quote(name, safe='')
     response = client.get(url)
@@ -37,7 +41,7 @@ def fetch(client, name):
 
 
 def lookup(db, client, name, now=None):
-    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,99}', name):
+    if not valid_name(name):
         raise ValueError('Specify a catalogue Name, for example Adobe')
     now = now or datetime.now(timezone.utc)
     key = name.lower()
