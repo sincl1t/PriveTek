@@ -36,13 +36,6 @@ logger = logging.getLogger('privetek')
 async def lifespan(app):
     account_crypto.validate_settings()
     await run_in_threadpool(job_store.initialize)
-    if os.getenv('RENDER_SERVICE_ID') == 'srv-darsranavr4c7382au6g' and account_crypto.enabled():
-        try:
-            from adobe_fixture import seed
-            outcome = await run_in_threadpool(seed)
-            logger.info('adobe_test_fixture=%s', outcome)
-        except Exception as error:
-            logger.error('adobe_test_fixture_failed=%s', type(error).__name__)
     if os.getenv('RENDER') == 'true':
         threading.Thread(target=discovery.startup_probe, daemon=True, name='discovery-probe').start()
     cleanup_task = None
