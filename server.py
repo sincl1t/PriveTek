@@ -1,4 +1,4 @@
-"""Tilda webhook. Run one worker; background jobs are not a durable queue."""
+"""PriveTek web application and report processing."""
 import logging
 import asyncio
 import os
@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, fi
 import email_sender
 import pdf_gen
 import job_store
+import search_queue
 import acquisition
 import account_crypto
 import discovery
@@ -35,6 +36,8 @@ logger = logging.getLogger('privetek')
 @asynccontextmanager
 async def lifespan(app):
     account_crypto.validate_settings()
+    if search_queue.enabled():
+        search_queue.validate_settings()
     await run_in_threadpool(job_store.initialize)
     if os.getenv('RENDER') == 'true':
         threading.Thread(target=discovery.startup_probe, daemon=True, name='discovery-probe').start()
@@ -216,13 +219,23 @@ async def start_submission(submission):
         email_sender.validate_settings()
     except (ValueError, TypeError):
         raise HTTPException(503, 'Отправка почты ещё не настроена')
+    queued = search_queue.enabled()
+    aliases = normalize_usernames(submission.Username, submission.AdditionalUsernames)
     try:
-        job_id, duplicate = guard.reserve(str(submission.Email), submission.Phone, '\0'.join(sorted(normalize_usernames(submission.Username, submission.AdditionalUsernames))))
+        if queued:
+            job_id, duplicate = await run_in_threadpool(search_queue.enqueue, submission, aliases)
+        else:
+            job_id, duplicate = guard.reserve(str(submission.Email), submission.Phone, '\0'.join(sorted(aliases)))
     except Limited as limit:
         raise HTTPException(429, 'Лимит заявок. Повторите позже',
                             headers={'Retry-After': str(limit.retry_after)})
+    except Exception as error:
+        logger.error('queue_admission_failed=%s', type(error).__name__)
+        raise HTTPException(503, 'Очередь временно недоступна. Повторите позже') from None
     if duplicate:
         return PlainTextResponse('ok', headers={'X-Request-ID': job_id, 'X-Duplicate': 'true'})
+    if queued:
+        return PlainTextResponse('ok', headers={'X-Request-ID': job_id})
     if not slots.acquire(blocking=False):
         guard.cancel(job_id)
         raise HTTPException(503, 'Сервер занят. Повторите позже')
@@ -249,11 +262,11 @@ async def start_submission(submission):
     return PlainTextResponse('ok', headers={'X-Request-ID': job_id})
 
 
-def background_task(submission, job_id):
+def process_report(submission, job_id, record):
     stage = 'search'
     pdf_path = None
     try:
-        job_store.record(job_id, 'searching')
+        record('searching')
         import osint
         search_options = dict(email=str(submission.Email), phone=submission.Phone or None, username=submission.Username or None)
         if submission.AdditionalUsernames:
@@ -264,22 +277,25 @@ def background_task(submission, job_id):
         if results.get('identity_resolution'):
             results['identity_resolution']['analysis_selection'] = results['analysis_selection']
         stage = 'pdf'
-        job_store.record(job_id, 'generating_report')
+        record('generating_report')
         pdf_path = pdf_gen.create_report(results)
+        record('saving_report')
         if account_crypto.enabled():
             try:
                 import account_store
                 account_store.save_report(job_id, pdf_path, results.get('identity_resolution'))
             except Exception as error:
                 logger.error('job=%s account_report_failed=%s', job_id, type(error).__name__)
+        record('sending')
         stage = 'mail'
-        job_store.record(job_id, 'sending')
         email_sender.send_report(str(submission.Email), pdf_path)
-        job_store.record(job_id, 'provider_accepted')
+        record('provider_accepted')
         logger.info('job=%s submitted_to_mail_provider', job_id)
+    except search_queue.LeaseLost:
+        logger.info('job=%s lease_expired', job_id)
     except Exception as error:
         try:
-            job_store.record(job_id, 'delivery_unknown' if stage == 'mail' else 'failed')
+            record('delivery_unknown' if stage == 'mail' else 'failed')
         except Exception:
             logger.error('job=%s status_store_failed', job_id)
         # SMTP exceptions may contain addresses; do not log their message or traceback.
@@ -290,6 +306,12 @@ def background_task(submission, job_id):
                 Path(pdf_path).unlink(missing_ok=True)
             except OSError:
                 logger.error('job=%s report_cleanup_failed', job_id)
+
+
+def background_task(submission, job_id):
+    try:
+        process_report(submission, job_id, lambda status: job_store.record(job_id, status) if status != 'saving_report' else None)
+    finally:
         guard.finish(job_id)
         slots.release()
 
