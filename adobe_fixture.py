@@ -25,11 +25,11 @@ def build_fixture(directory):
     return card, Path(path).read_bytes()
 
 
-def apply(email, card, pdf):
+def apply(email_fingerprint, card, pdf):
     cipher = account_crypto.report_cipher()
     with job_store.connect() as db:
-        owner = db.execute('SELECT id,email_key FROM privetek_users WHERE email=%s AND verified_at IS NOT NULL',
-                           (email,)).fetchone()
+        owner = db.execute("SELECT id,email_key FROM privetek_users WHERE encode(sha256(convert_to(email, 'UTF8')), 'hex')=%s AND verified_at IS NOT NULL",
+                           (email_fingerprint,)).fetchone()
         if owner is None:
             return 'account_not_found'
         job_id = uuid5(NAMESPACE, owner['id']).hex
@@ -52,4 +52,4 @@ def seed():
         card, pdf = build_fixture(directory)
     if not pdf.startswith(b'%PDF-') or card['findings'][0]['breach_names'] != ['Adobe']:
         raise ValueError('Invalid synthetic report')
-    return apply('privetekmail@gmail.com', card, pdf)
+    return apply('0d0ff144c494829e96cf3fc6585325f3d6cb7b206a56d3015a43eaaf5ccb4699', card, pdf)
