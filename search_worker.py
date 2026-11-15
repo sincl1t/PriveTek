@@ -33,6 +33,7 @@ def main():
     account_crypto.validate_settings()
     search_queue.validate_settings()
     job_store.initialize()
+    logger.info('search_worker_ready')
     stop = Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stop.set())
@@ -43,6 +44,7 @@ def main():
         except Exception as error:
             logger.error('queue_worker_failed=%s', type(error).__name__)
         stop.wait(1)
+    logger.info('search_worker_stopped')
 
 
 if __name__ == '__main__':
