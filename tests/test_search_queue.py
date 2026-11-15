@@ -1,7 +1,8 @@
 """Isolated PostgreSQL validation. The load test uses synthetic orders and mail."""
+import multiprocessing
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from threading import Barrier
 from uuid import uuid4
 
@@ -78,9 +79,17 @@ def test_cross_worker_source_budget(queue):
     assert source_limits.try_acquire('github.com')
 
 
+def drain_queue(_):
+    handled = 0
+    while search_worker.run_one():
+        handled += 1
+    return handled
+
+
 def test_parallel_worker_load(queue, monkeypatch, tmp_path, capsys):
     count = 1000
-    processed = []
+    deliveries = tmp_path / 'mail'
+    deliveries.mkdir()
     # Simulate data sources, disk rendering, and the mail provider without traffic.
     monkeypatch.setattr(osint, 'search', lambda **_: {'checks': []})
     def create_report(_):
@@ -89,7 +98,11 @@ def test_parallel_worker_load(queue, monkeypatch, tmp_path, capsys):
         return pdf
 
     monkeypatch.setattr(server.pdf_gen, 'create_report', create_report)
-    monkeypatch.setattr(server.email_sender, 'send_report', lambda email, _: processed.append(email))
+    def deliver(email, _):
+        # Exclusive creation makes duplicate sends visible across processes.
+        (deliveries / email).touch(exist_ok=False)
+
+    monkeypatch.setattr(server.email_sender, 'send_report', deliver)
 
     started = time.monotonic()
     with ThreadPoolExecutor(12) as pool:
@@ -98,18 +111,13 @@ def test_parallel_worker_load(queue, monkeypatch, tmp_path, capsys):
     assert len(set(accepted)) == count and all(not duplicate for _, duplicate in accepted)
 
     started = time.monotonic()
-    def drain(_):
-        handled = 0
-        while search_worker.run_one():
-            handled += 1
-        return handled
-
-    with ThreadPoolExecutor(8) as pool:
-        handled = list(pool.map(drain, range(8)))
+    # Each worker holds its own database sessions and inherits the synthetic adapters.
+    with ProcessPoolExecutor(8, mp_context=multiprocessing.get_context('fork')) as pool:
+        handled = list(pool.map(drain_queue, range(8)))
     drained_seconds = time.monotonic() - started
 
     assert sum(handled) == count and sum(n > 0 for n in handled) > 1
-    assert len(processed) == len(set(processed)) == count
+    assert len(list(deliveries.iterdir())) == count
     with job_store.connect() as conn:
         assert conn.execute("SELECT count(*) AS n FROM privetek_jobs WHERE status='provider_accepted'").fetchone()['n'] == count
         assert conn.execute('SELECT count(*) AS n FROM privetek_search_queue WHERE payload IS NOT NULL').fetchone()['n'] == 0
