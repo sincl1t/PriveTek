@@ -156,3 +156,68 @@ def test_db_concurrent_reviews_conflict_instead_of_overwrite(db,tmp_path):
         except RuntimeError:return 'conflict'
     with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(update,['mine','not_mine']))
     assert results.count(2)==1 and results.count('conflict')==1
+
+
+def test_db_breach_catalogue_on_authenticated_card(db, tmp_path, monkeypatch):
+    import httpx
+    import breach_catalogue
+
+    c = client()
+    register(c, db)
+    csrf = login(c)
+    other = client()
+    register(other, db, 'other@example.com')
+    login(other, 'other@example.com')
+    job = 'c' * 32
+    job_store.record(job, 'accepted', 'owner@example.com')
+    pdf = tmp_path / 'breach.pdf'
+    pdf.write_bytes(b'%PDF-test')
+    card = identity.build({
+        'checks': [
+            {'source': 'HIBP', 'kind': 'breach', 'status': 'found'},
+            {'source': 'LeakCheck', 'kind': 'breach', 'status': 'found'},
+        ],
+        'email_breach': [
+            {'source': 'HIBP', 'name': 'Adobe'},
+            {'source': 'LeakCheck', 'name': 'OtherBreach'},
+        ],
+    }, 'owner@example.com')
+    store.save_report(job, pdf, card)
+    route = f'/api/account/jobs/{job}/identity'
+    calls = []
+    failing = False
+    real_client = httpx.Client
+
+    def send(request):
+        calls.append(str(request.url))
+        if failing:
+            raise httpx.ConnectError('synthetic outage', request=request)
+        return httpx.Response(200, json={'Name': 'Adobe', 'Title': 'Adobe', 'BreachDate': '2013-10-04'})
+
+    monkeypatch.setattr(breach_catalogue.httpx, 'Client',
+                        lambda **options: real_client(transport=httpx.MockTransport(send), **options))
+    assert other.get(route).status_code == 404 and calls == []
+
+    response = c.get(route)
+    assert response.status_code == 200
+    hibp, leakcheck = response.json()['findings']
+    entry = hibp['catalogue'][0]
+    assert entry['source'] == 'Have I Been Pwned'
+    assert entry['source_url'] == 'https://haveibeenpwned.com/'
+    assert entry['breach_date'] == '2013-10-04' and entry['refreshed_at']
+    assert 'catalogue' not in leakcheck
+    assert calls == ['https://haveibeenpwned.com/api/v3/breach/Adobe']
+
+    failing = True
+    assert c.get(route).json()['findings'][0]['catalogue'][0] == entry
+    assert len(calls) == 1
+    with job_store.connect() as conn:
+        conn.execute("UPDATE privetek_breach_catalogue SET refreshed_at=now()-interval '25 hours' WHERE name_key='adobe'")
+    expired = c.get(route)
+    assert expired.status_code == 200
+    assert expired.json()['findings'][0]['catalogue'][0]['status'] == 'unavailable'
+    assert len(calls) == 2
+    assert expired.json()['findings'][0]['id'] == hibp['id']
+    review = c.put(route, headers={'X-CSRF-Token': csrf},
+                   json={'revision': 1, 'item_id': hibp['id'], 'decision': 'mine'})
+    assert review.status_code == 200 and review.json()['owner_group'] == [hibp['id']]
