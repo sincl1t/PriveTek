@@ -222,7 +222,7 @@ def test_db_account_submission_ignores_forged_email_and_owner(db,monkeypatch):
     c=client();register(c,db);csrf=login(c)
     monkeypatch.setattr(server.threading,'Thread',MagicMock())
     monkeypatch.setattr(server,'slots',MagicMock())
-    r=c.post('/api/account/jobs',json={'Email':'victim@example.com','owner':'evil','username':'mytest','consent':True},headers={'X-CSRF-Token':csrf})
+    r=c.post('/api/account/jobs',json={'Email':'victim@example.com','owner':'evil','username':'mytest','phone':'+12025550123','consent':True},headers={'X-CSRF-Token':csrf})
     assert r.status_code==202,r.text
     job=r.json()['job_id'];assert c.get('/api/account/jobs').json()['items'][0]['id']==job
     thread=server.threading.Thread.call_args
