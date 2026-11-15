@@ -145,8 +145,10 @@ def send_account_code(to_email, code, purpose):
     """Only called for an explicit account action; no automatic retries."""
     provider = validate_settings()
     recipient = mailbox(to_email)
-    subject = 'PriveTek: подтверждение email' if purpose == 'register' else 'PriveTek: восстановление пароля'
-    text = (f'Ваш код PriveTek: {code}\n\nКод действует 10 минут и может быть использован один раз. '
+    subject = {'register': 'PriveTek: подтверждение email', 'mfa': 'PriveTek: код входа'}.get(
+        purpose, 'PriveTek: восстановление пароля')
+    minutes = 5 if purpose == 'mfa' else 10
+    text = (f'Ваш код PriveTek: {code}\n\nКод действует {minutes} минут и может быть использован один раз. '
             'Никому его не сообщайте. Если вы не запрашивали код, проигнорируйте письмо.')
     if provider == 'brevo':
         settings = BrevoSettings.from_env()

@@ -144,3 +144,29 @@ def test_db_mfa_concurrent_recovery_and_totp_redeemed_once(db,monkeypatch):
         with ThreadPoolExecutor(max_workers=2) as pool:
             results=list(pool.map(lambda pair:mfa.finish_login(pair[0],factor,crypto.digest('session',pair[1])),zip(tokens,[secrets.token_urlsafe(32),secrets.token_urlsafe(32)])))
         assert results.count(True)==1 and results.count(False)==1
+
+
+def test_db_email_mfa_login_and_replay(db):
+    c=client()
+    register(c,db)
+    csrf=login(c)
+    enabled=post(c,'enable-email',{'password':PASSWORD,'code':''},csrf)
+    assert enabled.status_code==200
+    assert c.get('/api/account/security').json()['method']=='email'
+    other=client()
+    token=challenge(other)
+    email,code,purpose=db[-1]
+    assert email=='owner@example.com' and purpose=='mfa'
+    wrong='0'+code[1:] if code[0]!='0' else '1'+code[1:]
+    assert finish(other,token,wrong).status_code==400
+    assert finish(other,token,code).status_code==200
+    assert finish(client(),token,code).status_code==400
+    fallback=client()
+    assert finish(fallback,challenge(fallback),enabled.json()['recovery_codes'][0]).status_code==200
+
+
+def test_db_switch_to_email_requires_current_factor(db):
+    c=client()
+    csrf,_,codes=enroll(c,db)
+    assert post(c,'enable-email',{'password':PASSWORD,'code':''},csrf).status_code==400
+    assert post(c,'enable-email',{'password':PASSWORD,'code':codes[0]},csrf).status_code==200

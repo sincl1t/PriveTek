@@ -46,13 +46,14 @@ def new_recovery(db, user_id):
 
 
 def consume_factor(db, user, code):
-    if not user['mfa_enabled'] or not user['mfa_secret']:
+    if not user['mfa_enabled']:
         return False
-    secret = cipher().decrypt(bytes(user['mfa_secret'])).decode()
-    step = matching_step(secret, code, user['mfa_last_step'])
-    if step is not None:
-        db.execute('UPDATE privetek_users SET mfa_last_step=%s WHERE id=%s', (step, user['id']))
-        return True
+    if user['mfa_secret']:
+        secret = cipher().decrypt(bytes(user['mfa_secret'])).decode()
+        step = matching_step(secret, code, user['mfa_last_step'])
+        if step is not None:
+            db.execute('UPDATE privetek_users SET mfa_last_step=%s WHERE id=%s', (step, user['id']))
+            return True
     hashed = recovery_hash(user['id'], code)
     if hashed:
         return bool(db.execute('DELETE FROM privetek_mfa_recovery WHERE user_id=%s AND code_hash=%s RETURNING code_hash',
@@ -62,9 +63,15 @@ def consume_factor(db, user, code):
 
 def login_challenge(db, user):
     token = secrets.token_hex(24)
-    db.execute('INSERT INTO privetek_mfa_challenges (token_hash,user_id,version,expires_at) VALUES (%s,%s,%s,%s)',
-               (crypto.digest('mfa-login', token), user['id'], user['mfa_version'], now() + timedelta(minutes=5)))
-    return token
+    code = None
+    code_hash = None
+    if not user['mfa_secret']:
+        code = ''.join(secrets.choice('0123456789') for _ in range(8))
+        code_hash = crypto.digest('mfa-email', token + ':' + code)
+    db.execute('''INSERT INTO privetek_mfa_challenges (token_hash,user_id,version,expires_at,email_code_hash)
+                  VALUES (%s,%s,%s,%s,%s)''',
+               (crypto.digest('mfa-login', token), user['id'], user['mfa_version'], now() + timedelta(minutes=5), code_hash))
+    return (token, code) if code is not None else token
 
 
 def finish_login(challenge, code, session_hash):
@@ -79,7 +86,9 @@ def finish_login(challenge, code, session_hash):
         if not user or not row or row['expires_at'] <= now() or row['attempts'] >= 5 or row['version'] != user['mfa_version']:
             return False
         db.execute('UPDATE privetek_mfa_challenges SET attempts=attempts+1 WHERE token_hash=%s', (key,))
-        if not consume_factor(db, user, code):
+        email_matches = (user['mfa_enabled'] and not user['mfa_secret'] and row['email_code_hash']
+                         and secrets.compare_digest(row['email_code_hash'], crypto.digest('mfa-email', challenge + ':' + code)))
+        if not email_matches and not consume_factor(db, user, code):
             return False
         db.execute('DELETE FROM privetek_mfa_challenges WHERE token_hash=%s', (key,))
         db.execute('INSERT INTO privetek_sessions (token_hash,user_id,expires_at) VALUES (%s,%s,%s)',
@@ -89,9 +98,33 @@ def finish_login(challenge, code, session_hash):
 
 def status(user_id):
     with job_store.connect() as db:
-        user = db.execute('SELECT mfa_enabled FROM privetek_users WHERE id=%s', (user_id,)).fetchone()
+        user = db.execute('SELECT mfa_enabled,mfa_secret FROM privetek_users WHERE id=%s', (user_id,)).fetchone()
         count = db.execute('SELECT count(*) AS n FROM privetek_mfa_recovery WHERE user_id=%s', (user_id,)).fetchone()['n']
-    return {'enabled': bool(user and user['mfa_enabled']), 'recovery_codes_remaining': count}
+    result = {'enabled': bool(user and user['mfa_enabled']), 'recovery_codes_remaining': count}
+    if result['enabled'] and not user['mfa_secret']:
+        result['method'] = 'email'
+    return result
+
+
+def enable_email(user_id, password, code, session_hash):
+    with job_store.connect() as db:
+        user = db.execute('SELECT * FROM privetek_users WHERE id=%s FOR UPDATE', (user_id,)).fetchone()
+        if not user or not crypto.password_matches(user['password_hash'], password):
+            return None
+        if user['mfa_enabled'] and (not user['mfa_secret'] or not consume_factor(db, user, code)):
+            return None
+        db.execute('UPDATE privetek_users SET mfa_enabled=TRUE,mfa_secret=NULL,mfa_last_step=-1,mfa_version=mfa_version+1 WHERE id=%s',
+                   (user_id,))
+        codes = new_recovery(db, user_id)
+        db.execute('DELETE FROM privetek_mfa_setup WHERE user_id=%s', (user_id,))
+        db.execute('DELETE FROM privetek_mfa_challenges WHERE user_id=%s', (user_id,))
+        db.execute('DELETE FROM privetek_sessions WHERE user_id=%s AND token_hash<>%s', (user_id, session_hash))
+    return codes
+
+
+def cancel_login(challenge):
+    with job_store.connect() as db:
+        db.execute('DELETE FROM privetek_mfa_challenges WHERE token_hash=%s', (crypto.digest('mfa-login', challenge),))
 
 
 def setup(user_id, password, session_hash):

@@ -153,6 +153,19 @@ def action(data, request, name):
         outcome = store.login(email, password, crypto.digest('session', token))
         if not outcome:
             raise HTTPException(401, 'Неверный email или пароль; email должен быть подтверждён')
+        if isinstance(outcome, tuple):
+            import account_mfa
+            challenge, code = outcome
+            try:
+                quota(request, email, 'mfa-email-send', 5)
+                email_sender.send_account_code(email, code, 'mfa')
+            except HTTPException:
+                account_mfa.cancel_login(challenge)
+                raise
+            except Exception:
+                account_mfa.cancel_login(challenge)
+                raise HTTPException(503, 'Не удалось отправить код входа. Попробуйте позже') from None
+            return result(dict(mfa_required=True, method='email', challenge_id=challenge, expires_in=300))
         if isinstance(outcome, str):
             return result(dict(mfa_required=True, challenge_id=outcome, expires_in=300))
         return session_response(request, token)
@@ -160,11 +173,11 @@ def action(data, request, name):
         import account_mfa
         challenge, code = data.get('challenge_id'), data.get('code')
         if not isinstance(challenge, str) or not re.fullmatch(r'[0-9a-f]{48}', challenge) or not isinstance(code, str) or len(code) > 64:
-            raise HTTPException(422, 'Введите код приложения или резервный код')
+            raise HTTPException(422, 'Введите код входа или резервный код')
         quota(request, challenge, 'mfa-login', 10)
         token = secrets.token_urlsafe(32)
         if not account_mfa.finish_login(challenge, code.strip(), crypto.digest('session', token)):
-            raise HTTPException(400, 'Код неверен, уже использован или вход истёк. Для нового кода дождитесь его смены в приложении')
+            raise HTTPException(400, 'Код неверен, уже использован или вход истёк. Проверьте код или начните вход заново')
         return session_response(request, token)
     if name == 'logout':
         _, token = identify(request, mutation=True)
@@ -225,12 +238,14 @@ def security_action(data, request, name):
         raise HTTPException(422, 'Введите код подтверждения')
     if name == 'confirm':
         codes = account_mfa.confirm(user['id'], session_hash, code.strip())
+    elif name == 'enable-email':
+        codes = account_mfa.enable_email(user['id'], data.get('password'), code.strip(), session_hash)
     elif name in ('disable', 'recovery'):
         codes = account_mfa.manage(user['id'], data.get('password'), code.strip(), session_hash, disable=name == 'disable')
     else:
         raise HTTPException(404, 'Действие не найдено')
     if codes is None:
-        raise HTTPException(400, 'Проверьте пароль и новый код приложения или неиспользованный резервный код')
+        raise HTTPException(400, 'Проверьте пароль и код, который требуется для текущего способа защиты')
     return result(dict(enabled=name != 'disable', recovery_codes=codes))
 
 
