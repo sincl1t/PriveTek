@@ -79,14 +79,19 @@ def test_account_submission_passes_aliases_and_deduplicates_order(settings,monke
     thread=MagicMock();monkeypatch.setattr(server.threading,'Thread',thread)
     c=TestClient(server.app,base_url='https://privetek.test',headers={'Origin':'https://privetek.test'})
     try:
-        first=c.post('/api/account/jobs',json={'username':'One','additional_usernames':['Two','@One'],'consent':True})
+        for order in ({}, {'phone':'  '}, {'phone':'12345'}):
+            rejected=c.post('/api/account/jobs',json={**order,'consent':True})
+            assert rejected.status_code==422
+        thread.assert_not_called()
+        first=c.post('/api/account/jobs',json={'phone':'+1 (202) 555-0123','username':'One','additional_usernames':['Two','@One'],'consent':True})
         assert first.status_code==202
+        assert thread.call_args.kwargs['args'][0].Phone=='+12025550123'
         assert thread.call_args.kwargs['args'][0].AdditionalUsernames==['Two','One']
-        duplicate=c.post('/api/account/jobs',json={'username':'Two','additional_usernames':['One'],'consent':True})
+        duplicate=c.post('/api/account/jobs',json={'phone':'+12025550123','username':'Two','additional_usernames':['One'],'consent':True})
         assert duplicate.status_code==202 and duplicate.json()['duplicate'] is True
         assert duplicate.json()['job_id']==first.json()['job_id']
         assert thread.call_count==1
-        bad=c.post('/api/account/jobs',json={'additional_usernames':['a','b','c'],'consent':True})
+        bad=c.post('/api/account/jobs',json={'phone':'+12025550123','additional_usernames':['a','b','c'],'consent':True})
         assert bad.status_code==422 and thread.call_count==1
         no_consent=c.post('/api/account/jobs',json={'additional_usernames':['a'],'consent':False})
         assert no_consent.status_code==422

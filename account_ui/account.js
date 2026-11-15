@@ -310,7 +310,7 @@ function validateCheckForm() {
     field.setCustomValidity(error); if(error)valid=false;
   }
   const phone=$('phone').value.trim(), digits=phone.replace(/\D/g,'');
-  const error=phone && (!/^\+[0-9\s().-]+$/.test(phone) || digits.length<7 || digits.length>15) ? 'Укажите номер с кодом страны, например +7 912 345-67-89.' : '';
+  const error=(!phone || !/^\+[0-9\s().-]+$/.test(phone) || digits.length<7 || digits.length>15) ? 'Укажите номер с кодом страны, например +7 912 345-67-89.' : '';
   $('phone').setCustomValidity(error); return valid && !error;
 }
 for(const field of [...usernameFields(),$('phone')]) field.addEventListener('input',()=>{validateCheckForm();checkPayload();});

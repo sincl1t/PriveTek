@@ -309,6 +309,8 @@ async def account_submit(request: Request):
         submission = Submission(Name=draft['name'] if draft else data.get('name',''), Email=user['email'], Phone=data.get('phone', ''), Username=data.get('username', ''), AdditionalUsernames=data.get('additional_usernames', []))
     except (ValidationError, TypeError):
         raise HTTPException(422, 'Проверьте телефон с кодом страны и username без ссылок: до 64 латинских букв, цифр, точек, дефисов и подчёркиваний. Дополнительных username — не более двух.') from None
+    if not submission.Phone:
+        raise HTTPException(422, 'Укажите номер телефона с кодом страны')
     response = await start_submission(submission)
     if response.headers.get('X-Duplicate') != 'true':
         await run_in_threadpool(acquisition.safe, acquisition.associate_job, request, response.headers['X-Request-ID'])
