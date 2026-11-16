@@ -147,3 +147,25 @@ def submit(user_id, username):
                 if not saved:
                     raise HTTPException(409, 'Срок запроса истёк. Попробуйте снова.')
     return state(user_id)
+
+
+def grant_retest_access():
+    target = os.getenv('PROFILE_SEARCH_RETEST_ACCOUNT_SHA256', '')
+    if not enabled() or not re.fullmatch(r'[a-f0-9]{64}', target):
+        return
+    try:
+        with job_store.connect() as db:
+            rows = db.execute("""
+                UPDATE privetek_profile_search p SET access_until=now()+interval '20 minutes'
+                FROM privetek_users u
+                WHERE u.id=p.user_id AND u.verified_at IS NOT NULL AND p.free_used
+                  AND encode(sha256(convert_to(u.email, 'UTF8')), 'hex')=%s
+                  AND p.access_until < now()
+                  AND p.access_until < TIMESTAMPTZ '2026-11-16 15:20:00+00'
+                RETURNING p.user_id
+            """, (target,)).fetchall()
+            if len(rows) > 1:
+                raise ValueError('Ambiguous retest account')
+        logger.info('profile_search_retest_granted=%d', len(rows))
+    except Exception as error:
+        logger.error('profile_search_retest_failed=%s', type(error).__name__)
