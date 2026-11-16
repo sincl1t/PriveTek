@@ -205,7 +205,11 @@ async def auth(name: str, request: Request):
 def me(request: Request):
     ready()
     user, token = identify(request)
-    return result(dict(email=user['email'], csrf_token=crypto.digest('csrf', token)))
+    import profile_search
+    payload = dict(email=user['email'], csrf_token=crypto.digest('csrf', token))
+    if profile_search.enabled():
+        payload['profile_search_enabled'] = True
+    return result(payload)
 
 
 @router.get('/api/account/security')
@@ -401,3 +405,35 @@ async def analytics_event(request: Request):
         raise HTTPException(429, 'Слишком много событий')
     await run_in_threadpool(acquisition.safe, acquisition.client_event, request, kind)
     return result({'accepted': True})
+
+
+@router.get('/api/account/profile-search')
+def profile_search_status(request: Request):
+    import profile_search
+    ready()
+    if not profile_search.enabled():
+        raise HTTPException(404, 'Поиск по username пока недоступен')
+    user, _ = identify(request)
+    return result(profile_search.state(user['id']))
+
+
+@router.post('/api/account/profile-search')
+async def profile_search_submit(request: Request):
+    import profile_search
+    from search_inputs import normalize_username
+    ready()
+    if not profile_search.enabled():
+        raise HTTPException(404, 'Поиск по username пока недоступен')
+    origin(request)
+    data = await body(request)
+    user, _ = await run_in_threadpool(identify, request, True)
+    try:
+        username = normalize_username(data.get('username'))
+        if not username:
+            raise ValueError('Введите username.')
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    if data.get('consent') is not True:
+        raise HTTPException(422, 'Подтвердите согласие на проверку своего username.')
+    await run_in_threadpool(quota, request, user['email'], 'profile-search', 10)
+    return result(await run_in_threadpool(profile_search.submit, user['id'], username))

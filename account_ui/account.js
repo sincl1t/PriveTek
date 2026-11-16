@@ -106,15 +106,75 @@ $('auth-form').onsubmit = async event => {
   } catch (error) { message('auth-message',error.message,true); }
   finally { authBusy=false; $('auth-submit').disabled=false; }
 };
-function signedOut(notice='') { closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode(location.pathname==='/account/register'?'register':'login',notice); updateDraftNotice(); }
+function signedOut(notice='') { clearProfileSearch(); closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode(location.pathname==='/account/register'?'register':'login',notice); updateDraftNotice(); }
 async function openDashboard() {
   const ticket=++generation; let user;
   try { user = await api('me'); } catch(error) { if(ticket!==generation)return; throw error; }
   if(ticket!==generation)return; loading=false; csrf=user.csrf_token; userEmail=user.email;
-  $('account-email').textContent=userEmail; $('check-email').value=userEmail; $('auth-view').hidden=true; $('dashboard').hidden=false; $('logout').hidden=false; offset=0; await Promise.all([loadJobs(true), loadSecurity(), loadMonitor()]); updateDraftNotice();
+  $('account-email').textContent=userEmail; $('check-email').value=userEmail; $('auth-view').hidden=true; $('dashboard').hidden=false; $('logout').hidden=false; offset=0; await Promise.all([loadJobs(true), loadSecurity(), loadMonitor(), loadProfileSearch(user.profile_search_enabled)]); updateDraftNotice();
   if(pendingDraft && userEmail.toLowerCase()===pendingDraft.email.toLowerCase() && !draftOffered) {draftOffered=true; openDraftCheck();}
 }
 function textEl(tag, cls, text) { const el=document.createElement(tag); el.className=cls; el.textContent=text; return el; }
+function clearProfileSearch() {
+  $('profile-search').hidden = true;
+  $('profile-search-form').reset();
+  $('profile-search-results').textContent = '';
+  message('profile-search-message', '');
+}
+function renderProfileSearch(state) {
+  $('profile-search-access').textContent = state.subscribed ? 'Подписка активна.'
+    : state.free_available ? 'Доступен один бесплатный запрос.'
+    : 'Бесплатный запрос использован. Для продолжения нужна подписка. Условия пилота уточняйте у команды PriveTek.';
+  $('profile-search-form').hidden = !state.free_available && !state.subscribed;
+  $('profile-search-submit').disabled = state.busy;
+  if (state.busy) message('profile-search-message', 'Запрос выполняется. Обновите страницу через минуту.');
+  const items = $('profile-search-results');
+  items.textContent = '';
+  const labels = {found: 'Найден профиль', not_found: 'Совпадений не найдено', unavailable: 'Проверка недоступна'};
+  for (const row of state.results) {
+    const item = textEl('li', '', row.site + ' — ' + labels[row.status]);
+    if (row.url) {
+      const link = textEl('a', '', 'Открыть профиль ↗');
+      link.href = row.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      item.append(' ', link);
+    }
+    items.append(item);
+  }
+}
+async function loadProfileSearch(enabled) {
+  clearProfileSearch();
+  if (!enabled) return;
+  const ticket = generation;
+  $('profile-search').hidden = false;
+  try {
+    const data = await api('profile-search');
+    if (ticket === generation) renderProfileSearch(data);
+  } catch (error) {
+    if (ticket === generation) message('profile-search-message', error.message, true);
+  }
+}
+$('profile-search-form').onsubmit = async event => {
+  event.preventDefault();
+  const button = $('profile-search-submit');
+  if (button.disabled) return;
+  const ticket = generation;
+  button.disabled = true;
+  message('profile-search-message', 'Проверяем публичные профили…');
+  try {
+    const data = await api('profile-search', {method: 'POST', body: JSON.stringify({
+      username: $('profile-search-name').value, consent: $('profile-search-consent').checked
+    })});
+    if (ticket !== generation) return;
+    $('profile-search-form').reset();
+    renderProfileSearch(data);
+    message('profile-search-message', 'Поиск завершён. Совпадение имени не подтверждает, кому принадлежит профиль.');
+  } catch (error) {
+    if (ticket !== generation) return;
+    if (error.status !== 409) button.disabled = false;
+    if (error.status === 402) $('profile-search-form').hidden = true;
+    message('profile-search-message', error.message, true);
+  }
+};
 function renderJob(job) {
   if (!/^[0-9a-f]{32}$/.test(job.id)) return null;
   const row=textEl('article','job',''); row.dataset.id=job.id;
