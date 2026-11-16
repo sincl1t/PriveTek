@@ -106,7 +106,54 @@ $('auth-form').onsubmit = async event => {
   } catch (error) { message('auth-message',error.message,true); }
   finally { authBusy=false; $('auth-submit').disabled=false; }
 };
-function signedOut(notice='') { clearProfileSearch(); closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode(location.pathname==='/account/register'?'register':'login',notice); updateDraftNotice(); }
+function signedOut(notice='') { clearProfileSearch(); $('link-check-form').reset(); $('link-check-result').textContent=''; closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode(location.pathname==='/account/register'?'register':'login',notice); updateDraftNotice(); }
+
+function assessLink(value) {
+  const address = value.trim();
+  const authority = /^https?:\/\/([^/?#]+)/i.exec(address);
+  if (!authority || /[\s\\\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/.test(address)) {
+    return {error: 'Введите полный адрес HTTP или HTTPS без пробелов и скрытых символов.'};
+  }
+  let url;
+  try {
+    url = new URL(address);
+  } catch {
+    return {error: 'Не удалось разобрать адрес. Проверьте скопированную ссылку.'};
+  }
+
+  const signals = [];
+  if (url.protocol === 'http:') signals.push('HTTP не шифрует соединение.');
+  if (authority[1].includes('@')) signals.push('Символ @ в начале адреса может скрывать фактический домен.');
+  if (url.port) signals.push('Адрес использует нестандартный порт.');
+  if (url.hostname.split('.').some(label => label.startsWith('xn--'))) {
+    signals.push('В доменном имени есть международные символы. Сверьте его с официальным адресом сайта.');
+  }
+  if (/^(?:\[|\d+(?:\.\d+){3}$)/.test(url.hostname)) {
+    signals.push('Вместо доменного имени указан IP-адрес.');
+  }
+  return {hostname: url.hostname, signals};
+}
+
+$('link-check-url').addEventListener('input', () => { $('link-check-result').textContent = ''; });
+$('link-check-form').onsubmit = event => {
+  event.preventDefault();
+  if ($('dashboard').hidden) return;
+  const result = $('link-check-result');
+  const {error, hostname, signals} = assessLink($('link-check-url').value);
+  result.textContent = '';
+  if (error) {
+    result.append(textEl('p', 'message error', error));
+    return;
+  }
+  result.append(textEl('p', 'link-check-host', 'Хост: ' + hostname));
+  if (!signals.length) {
+    result.append(textEl('p', '', 'В адресе не обнаружены проверяемые признаки риска. Безопасность сайта не подтверждена.'));
+    return;
+  }
+  const list = textEl('ul', '', '');
+  for (const signal of signals) list.append(textEl('li', '', signal));
+  result.append(textEl('p', '', 'Перед переходом проверьте адрес сайта:'), list);
+};
 async function openDashboard() {
   const ticket=++generation; let user;
   try { user = await api('me'); } catch(error) { if(ticket!==generation)return; throw error; }
