@@ -437,3 +437,22 @@ async def profile_search_submit(request: Request):
         raise HTTPException(422, 'Подтвердите согласие на проверку своего username.')
     await run_in_threadpool(quota, request, user['email'], 'profile-search', 10)
     return result(await run_in_threadpool(profile_search.submit, user['id'], username))
+
+
+@router.post('/api/account/counterparty')
+async def counterparty_check(request: Request):
+    import counterparty
+
+    ready()
+    origin(request)
+    user, _ = await run_in_threadpool(identify, request, True)
+    data = await body(request)
+    try:
+        field, identifier = counterparty.company_identifier(data.get('identifier'))
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    token = counterparty.provider_token()
+    if not token:
+        raise HTTPException(503, 'Источник данных о компаниях пока не подключён.')
+    await run_in_threadpool(quota, request, user['email'], 'counterparty', 10)
+    return result(await run_in_threadpool(counterparty.assess, field, identifier, token))
