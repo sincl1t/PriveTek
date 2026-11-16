@@ -6,7 +6,7 @@
 [Поисковый модуль](https://github.com/soxoj/maigret) · [Telegram-бот](https://github.com/soxoj/maigret-tg-bot)
 
 Пилот включается через `PROFILE_SEARCH_ENABLED=true` после установки
-`requirements-profile-search.txt` на Python 3.11+. По умолчанию выключен.
+`requirements.txt` на Python 3.11+. По умолчанию выключен.
 Перед включением веб-приложение должно применить миграцию 011.
 
 Первый завершённый поиск расходует бесплатный запрос, даже если совпадений нет.

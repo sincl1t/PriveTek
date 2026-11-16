@@ -1,2 +1,0 @@
--r requirements.txt
-maigret==0.6.6
