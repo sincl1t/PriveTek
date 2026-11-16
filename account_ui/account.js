@@ -139,9 +139,11 @@ function renderProfileSearch(state) {
 }
 function showProfileResults(results, bubble, previous = false) {
   const reply = profileBubble(previous ? 'Последний сохранённый результат.' : 'Поиск завершён.', 'bot', bubble);
+  const found = results.filter(row => row.status === 'found');
+  reply.append(textEl('p', 'small', 'Найдено профилей: ' + found.length + ' · Источников в ответе: ' + results.length));
   const items = textEl('ul', 'profile-chat-results', '');
-  const labels = {found: 'Найден профиль', not_found: 'Совпадений не найдено', unavailable: 'Проверка недоступна'};
-  for (const row of results) {
+  const labels = {found: 'Найден профиль', not_found: 'Совпадений не найдено', unavailable: 'Проверка недоступна', skipped: 'Формат имени не подходит'};
+  for (const row of [...found, ...results.filter(row => row.status !== 'found')]) {
     const item = textEl('li', '', row.site + ' — ' + labels[row.status]);
     if (row.url) {
       const link = textEl('a', '', 'Открыть профиль ↗');
@@ -165,7 +167,7 @@ async function loadProfileSearch(enabled) {
   const ticket = generation;
   $('profile-search').hidden = false;
   $('profile-search-access').textContent = '';
-  profileBubble('Отправьте свой username. Я проверю публичные профили в Bluesky, OpenStreetMap и RubyGems. Для Bluesky поддерживаются имена в зоне bsky.social.');
+  profileBubble('Отправьте свой username. Я проверю публичные профили на 17 площадках, включая GitHub, Bluesky, OpenStreetMap и RubyGems. Для Bluesky поддерживаются имена в зоне bsky.social.');
   try {
     const state = await api('profile-search');
     if (ticket !== generation) return;

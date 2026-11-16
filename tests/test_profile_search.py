@@ -47,3 +47,28 @@ def test_db_profile_search_free_failure_repeat_and_subscription(db, monkeypatch)
     with job_store.connect() as conn:
         conn.execute("UPDATE privetek_profile_search SET access_until=now()-interval '1 minute'")
     assert c.post(url, json=body, headers=headers).status_code == 402
+
+
+def test_search_uses_all_username_sources_and_preserves_unavailable(monkeypatch):
+    import asyncio
+
+    async def check(source, username, _client):
+        assert username == 'octocat'
+        if source[0] == 'GitHub':
+            return {'status': 'found', 'profile_url': 'https://github.com/octocat'}
+        if source[0] == 'Roblox':
+            raise RuntimeError('test outage')
+        return {'status': 'skipped'}
+
+    async def maigret(username):
+        assert username == 'octocat'
+        return [dict(site=site, status='not_found', url=None) for site in profile_search.SITES]
+
+    monkeypatch.setattr(profile_search.public_sources, 'check_profile', check)
+    monkeypatch.setattr(profile_search.discovery, 'check', check)
+    monkeypatch.setattr(profile_search, 'search_maigret', maigret)
+    rows = asyncio.run(profile_search.search('octocat'))
+    assert len(rows) == len({row['site'] for row in rows}) == 17
+    assert rows[0] == {'site': 'GitHub', 'status': 'found', 'url': 'https://github.com/octocat'}
+    assert {row['site']: row['status'] for row in rows}['Roblox'] == 'unavailable'
+    assert rows[-1] == {'site': 'RubyGems', 'status': 'not_found', 'url': None}
