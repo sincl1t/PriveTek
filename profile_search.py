@@ -1,4 +1,4 @@
-"""Opt-in public username search powered by Maigret."""
+"""Opt-in public username search from PriveTek and Maigret."""
 import asyncio
 import json
 import logging
@@ -6,10 +6,14 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
+import trio
 from fastapi import HTTPException
 
 import account_crypto
+import discovery
 import job_store
+import public_sources
 
 SITES = ('Bluesky', 'OpenStreetMap', 'RubyGems')
 logger = logging.getLogger('privetek.profile_search')
@@ -21,7 +25,7 @@ def enabled():
     return os.getenv('PROFILE_SEARCH_ENABLED', '').lower() == 'true'
 
 
-async def search(username):
+async def search_maigret(username):
     import maigret as package
     from maigret.checking import maigret
     from maigret.sites import MaigretDatabase
@@ -43,6 +47,46 @@ async def search(username):
         output.append(dict(site=site, status='found' if found else 'not_found' if absent else 'unavailable',
                            url=expected_url if found else None))
     return output
+
+
+async def search_privetek(username):
+    checks = [(source, public_sources.check_profile) for source in public_sources.SOURCES]
+    checks.extend((source, discovery.check) for source in discovery.SOURCES)
+    results = [dict(site=source[0], status='unavailable', url=None) for source, _ in checks]
+    limiter = trio.CapacityLimiter(4)
+
+    async with httpx.AsyncClient(timeout=8, follow_redirects=False, headers={
+        'User-Agent': public_sources.USER_AGENT, 'Accept': 'application/json'
+    }) as client:
+        async def run_one(index, source, adapter):
+            async with limiter:
+                try:
+                    row = await adapter(source, username, client)
+                    status = row['status']
+                    results[index] = dict(site=source[0], status=status,
+                                          url=row.get('profile_url') if status == 'found' else None)
+                except Exception:
+                    return
+
+        with trio.move_on_after(18):
+            async with trio.open_nursery() as nursery:
+                for index, (source, adapter) in enumerate(checks):
+                    nursery.start_soon(run_one, index, source, adapter)
+    return results
+
+
+async def search(username):
+    async def maigret_or_unavailable():
+        try:
+            return await asyncio.wait_for(search_maigret(username), timeout=12)
+        except Exception:
+            return [dict(site=site, status='unavailable', url=None) for site in SITES]
+
+    existing, extra = await asyncio.gather(
+        asyncio.to_thread(trio.run, search_privetek, username),
+        maigret_or_unavailable(),
+    )
+    return existing + extra
 
 
 def state(user_id):
