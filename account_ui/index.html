@@ -37,6 +37,17 @@
 <div id="link-check-result" role="status" aria-live="polite"></div>
 </div>
 </section>
+<section class="jobs-card security-card" aria-labelledby="counterparty-title">
+<div class="list-heading"><h2 id="counterparty-title">Проверка контрагента</h2></div>
+<div class="security-content">
+<p id="counterparty-help">Проверяем статус российского юрлица по сведениям ЕГРЮЛ. В DaData передаётся только ИНН или ОГРН компании. Результат охватывает регистрационный статус.</p>
+<form id="counterparty-form">
+<div class="field"><label for="counterparty-identifier">ИНН или ОГРН компании</label><input id="counterparty-identifier" inputmode="numeric" pattern="[0-9]{10}|[0-9]{13}" maxlength="13" required autocomplete="off" aria-describedby="counterparty-help"></div>
+<button id="counterparty-submit" class="button primary" type="submit">Проверить компанию</button>
+</form>
+<div id="counterparty-result" role="status" aria-live="polite"></div>
+</div>
+</section>
 <section class="jobs-card security-card" aria-labelledby="security-title">
 <div class="list-heading"><h2 id="security-title">Защита входа</h2><span id="mfa-status" class="badge pending">Загрузка…</span></div>
 <div class="security-content"><p>После пароля потребуется код из письма или приложения-аутентификатора. Сохраните резервные коды на случай потери доступа к выбранному способу.</p>

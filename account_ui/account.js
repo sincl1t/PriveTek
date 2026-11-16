@@ -106,7 +106,7 @@ $('auth-form').onsubmit = async event => {
   } catch (error) { message('auth-message',error.message,true); }
   finally { authBusy=false; $('auth-submit').disabled=false; }
 };
-function signedOut(notice='') { clearProfileSearch(); $('link-check-form').reset(); $('link-check-result').textContent=''; closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode(location.pathname==='/account/register'?'register':'login',notice); updateDraftNotice(); }
+function signedOut(notice='') { clearProfileSearch(); $('counterparty-form').reset(); $('link-check-form').reset(); $('link-check-result').textContent=''; closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode(location.pathname==='/account/register'?'register':'login',notice); updateDraftNotice(); }
 
 function assessLink(value) {
   const address = value.trim();
@@ -154,6 +154,56 @@ $('link-check-form').onsubmit = event => {
   for (const signal of signals) list.append(textEl('li', '', signal));
   result.append(textEl('p', '', 'Перед переходом проверьте адрес сайта:'), list);
 };
+let counterpartyRequest = null;
+$('counterparty-form').addEventListener('reset', () => {
+  counterpartyRequest = null;
+  $('counterparty-result').textContent = '';
+  $('counterparty-submit').disabled = false;
+});
+$('counterparty-identifier').addEventListener('input', () => {
+  $('counterparty-result').textContent = '';
+});
+$('counterparty-form').onsubmit = async event => {
+  event.preventDefault();
+  if ($('dashboard').hidden || counterpartyRequest) return;
+  const button = $('counterparty-submit');
+  const input = $('counterparty-identifier');
+  const result = $('counterparty-result');
+  const identifier = input.value;
+  const request = {};
+  counterpartyRequest = request;
+  button.disabled = true;
+  result.textContent = 'Проверяем сведения о компании…';
+  try {
+    const data = await api('counterparty', {
+      method: 'POST', body: JSON.stringify({identifier})
+    });
+    if (counterpartyRequest !== request || input.value !== identifier) return;
+    result.textContent = '';
+    result.append(textEl('h3', '', data.status));
+    const source = textEl('a', '', data.source);
+    source.href = 'https://dadata.ru/api/find-party/';
+    const check = textEl('p', 'small', '');
+    check.append(source, ' · Проверено ' + new Date(data.checked_at).toLocaleString('ru-RU'));
+    const signals = textEl('ul', '', '');
+    for (const signal of data.signals) signals.append(textEl('li', '', signal));
+    if (data.signals.length) result.append(signals);
+    else result.append(textEl('p', '', data.outcome === 'found'
+      ? 'По регистрационному статусу признаки риска не выявлены.'
+      : 'Недостаточно данных для оценки.'));
+    result.append(check);
+  } catch (error) {
+    if (counterpartyRequest !== request) return;
+    if (error.status === 401) signedOut('Сессия завершилась. Войдите снова.');
+    else if (input.value === identifier) result.textContent = error.message;
+  } finally {
+    if (counterpartyRequest === request) {
+      counterpartyRequest = null;
+      button.disabled = false;
+    }
+  }
+};
+
 async function openDashboard() {
   const ticket=++generation; let user;
   try { user = await api('me'); } catch(error) { if(ticket!==generation)return; throw error; }
