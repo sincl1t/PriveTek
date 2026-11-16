@@ -3,9 +3,10 @@ import asyncio
 import json
 import logging
 import os
-from pathlib import Path
+import re
 from uuid import uuid4
 
+from bs4 import BeautifulSoup
 import httpx
 import trio
 from fastapi import HTTPException
@@ -15,48 +16,73 @@ import discovery
 import job_store
 import public_sources
 
-SITES = ('Bluesky', 'OpenStreetMap', 'RubyGems')
+EXTRA_SOURCES = (
+    ('Bluesky', 'https://bsky.app/profile/{username}.bsky.social', r'[A-Za-z0-9][A-Za-z0-9-]{0,62}'),
+    ('OpenStreetMap', 'https://www.openstreetmap.org/user/{username}', r'[A-Za-z0-9_][A-Za-z0-9_-]{0,63}'),
+    ('RubyGems', 'https://rubygems.org/profiles/{username}', r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'),
+)
 logger = logging.getLogger('privetek.profile_search')
-logger.propagate = False
-logger.addHandler(logging.NullHandler())
 
 
 def enabled():
     return os.getenv('PROFILE_SEARCH_ENABLED', '').lower() == 'true'
 
 
-async def search_maigret(username):
-    import maigret as package
-    from maigret.checking import maigret
-    from maigret.sites import MaigretDatabase
+async def public_page(site, username, client):
+    name, template, pattern = site
+    if not re.fullmatch(pattern, username) or (name == 'GitHub' and '--' in username):
+        return dict(status='skipped')
+    url = template.format(username=username)
+    try:
+        if name == 'Bluesky':
+            handle = username.lower() + '.bsky.social'
+            response = await client.get('https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile',
+                                        params={'actor': handle})
+            if response.status_code in (200, 400):
+                data = response.json()
+                if isinstance(data, dict):
+                    if response.status_code == 200 and data.get('handle') == handle and data.get('did'):
+                        return dict(status='found', profile_url='https://bsky.app/profile/' + handle)
+                    if response.status_code == 400 and data.get('error') == 'InvalidRequest' and data.get('message') == 'Profile not found':
+                        return dict(status='not_found')
+        else:
+            response = await client.get(url)
+            if response.status_code == 404:
+                return dict(status='not_found')
+            if response.status_code == 200 and 'text/html' in response.headers.get('content-type', ''):
+                page = BeautifulSoup(response.content, 'html.parser')
+                title = page.title.get_text(strip=True) if page.title else ''
+                if name == 'GitHub':
+                    login = page.find('meta', attrs={'name': 'octolytics-dimension-user_login'})
+                    canonical = page.find('meta', property='og:url')
+                    if login and canonical and login.get('content', '').casefold() == username.casefold():
+                        href = 'https://github.com/' + login['content']
+                        if canonical.get('content') == href:
+                            return dict(status='found', profile_url=href)
+                elif name == 'OpenStreetMap' and title == username + ' | OpenStreetMap':
+                    return dict(status='found', profile_url=url)
+                elif name == 'RubyGems' and title.split(' | ', 1)[0].casefold() == ('Profile of ' + username).casefold():
+                    return dict(status='found', profile_url=url)
+        logger.info('profile_source_unavailable source=%s http=%s', name, response.status_code)
+    except (httpx.HTTPError, ValueError) as error:
+        logger.info('profile_source_unavailable source=%s reason=%s', name, type(error).__name__)
+    return dict(status='unavailable')
 
-    db = MaigretDatabase()
-    db.load_from_path(str(Path(package.__file__).parent / 'resources' / 'data.json'))
-    rows = await maigret(username, {site: db.sites_dict[site] for site in SITES}, logger,
-                         timeout=8, max_connections=3, no_progressbar=True, retries=0,
-                         is_parsing_enabled=False, is_enrich_enabled=False, check_domains=False)
-    output = []
-    for site in SITES:
-        result = rows.get(site) or {}
-        status = result.get('status')
-        name = status.status.name if status else None
-        code = result.get('http_status')
-        expected_url = db.sites_dict[site].url.format(username=username)
-        found = name == 'CLAIMED' and code == 200 and result.get('url_user') == expected_url
-        absent = name == 'AVAILABLE' and code == (400 if site == 'Bluesky' else 404)
-        output.append(dict(site=site, status='found' if found else 'not_found' if absent else 'unavailable',
-                           url=expected_url if found else None))
-    return output
 
-
-async def search_privetek(username):
-    checks = [(source, public_sources.check_profile) for source in public_sources.SOURCES]
+async def search_sources(username):
+    checks = []
+    for source in public_sources.SOURCES:
+        if source[0] == 'GitHub':
+            checks.append((('GitHub', 'https://github.com/{username}', source[-1]), public_page))
+        else:
+            checks.append((source, public_sources.check_profile))
     checks.extend((source, discovery.check) for source in discovery.SOURCES)
+    checks.extend((source, public_page) for source in EXTRA_SOURCES)
     results = [dict(site=source[0], status='unavailable', url=None) for source, _ in checks]
-    limiter = trio.CapacityLimiter(4)
+    limiter = trio.CapacityLimiter(5)
 
-    async with httpx.AsyncClient(timeout=8, follow_redirects=False, headers={
-        'User-Agent': public_sources.USER_AGENT, 'Accept': 'application/json'
+    async with httpx.AsyncClient(timeout=6, follow_redirects=False, headers={
+        'User-Agent': public_sources.USER_AGENT, 'Accept': 'application/json, text/html'
     }) as client:
         async def run_one(index, source, adapter):
             async with limiter:
@@ -65,10 +91,10 @@ async def search_privetek(username):
                     status = row['status']
                     results[index] = dict(site=source[0], status=status,
                                           url=row.get('profile_url') if status == 'found' else None)
-                except Exception:
-                    return
+                except Exception as error:
+                    logger.info('profile_source_unavailable source=%s reason=%s', source[0], type(error).__name__)
 
-        with trio.move_on_after(18):
+        with trio.move_on_after(20):
             async with trio.open_nursery() as nursery:
                 for index, (source, adapter) in enumerate(checks):
                     nursery.start_soon(run_one, index, source, adapter)
@@ -76,17 +102,7 @@ async def search_privetek(username):
 
 
 async def search(username):
-    async def maigret_or_unavailable():
-        try:
-            return await asyncio.wait_for(search_maigret(username), timeout=12)
-        except Exception:
-            return [dict(site=site, status='unavailable', url=None) for site in SITES]
-
-    existing, extra = await asyncio.gather(
-        asyncio.to_thread(trio.run, search_privetek, username),
-        maigret_or_unavailable(),
-    )
-    return existing + extra
+    return await asyncio.to_thread(trio.run, search_sources, username)
 
 
 def state(user_id):

@@ -2,7 +2,8 @@
 
 В подтверждённом аккаунте PriveTek доступен отдельный поиск по username.
 Чат использует 14 действующих адаптеров PriveTek для username, включая GitHub,
-и три правила Maigret 0.6.6 (MIT): Bluesky, OpenStreetMap и RubyGems.
+и три площадки из пилота Maigret 0.6.6 (MIT): Bluesky, OpenStreetMap и RubyGems.
+В чате они проверяются напрямую, как и публичная страница GitHub.
 Bluesky проверяется в зоне bsky.social.
 [Поисковый модуль](https://github.com/soxoj/maigret) · [Telegram-бот](https://github.com/soxoj/maigret-tg-bot)
 
