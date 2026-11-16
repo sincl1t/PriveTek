@@ -26,6 +26,17 @@
 </div>
 </form>
 </section>
+<section class="jobs-card security-card" aria-labelledby="link-check-title">
+<div class="list-heading"><h2 id="link-check-title">Проверка ссылок</h2></div>
+<div class="security-content">
+<p id="link-check-help">Проверяем признаки риска в адресе. Ссылка остаётся в браузере: сайт не открывается, репутация и содержимое не проверяются.</p>
+<form id="link-check-form">
+<div class="field"><label for="link-check-url">Адрес ссылки</label><input id="link-check-url" inputmode="url" placeholder="https://example.com" maxlength="4096" required autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="link-check-help"></div>
+<button class="button primary" type="submit">Проверить адрес</button>
+</form>
+<div id="link-check-result" role="status" aria-live="polite"></div>
+</div>
+</section>
 <section class="jobs-card security-card" aria-labelledby="security-title">
 <div class="list-heading"><h2 id="security-title">Защита входа</h2><span id="mfa-status" class="badge pending">Загрузка…</span></div>
 <div class="security-content"><p>После пароля потребуется код из письма или приложения-аутентификатора. Сохраните резервные коды на случай потери доступа к выбранному способу.</p>

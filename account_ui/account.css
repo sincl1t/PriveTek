@@ -98,6 +98,7 @@ input::placeholder { color: #8a8ea9; }
 .card-footer span { color: var(--ink); margin-right: 7px; }
 .message { padding: 13px 15px; border-radius: 12px; font-size: 14px; background: #e5fcfa; color: #175e5c; overflow-wrap: anywhere; }
 .message.error { background: #fff0f1; color: var(--red); }
+.link-check-host { overflow-wrap: anywhere; }
 .footer { max-width: 1168px; padding: 24px 0; margin: auto; border-top: 1px solid #ffffff26; display: flex; justify-content: space-between; gap: 20px; font-size: 12px; color: #bbc0df; }
 .dashboard-heading { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 58px 0 34px; }
 .dashboard-heading h1 { font-size: 46px; margin: 15px 0 9px; }
