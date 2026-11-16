@@ -36,9 +36,6 @@ logger = logging.getLogger('privetek')
 async def lifespan(app):
     account_crypto.validate_settings()
     await run_in_threadpool(job_store.initialize)
-    if os.getenv('RENDER_SERVICE_ID') == 'srv-darsranavr4c7382au6g':
-        from profile_search import grant_retest_access
-        await run_in_threadpool(grant_retest_access)
     if os.getenv('RENDER') == 'true':
         threading.Thread(target=discovery.startup_probe, daemon=True, name='discovery-probe').start()
     cleanup_task = None
