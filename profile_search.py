@@ -87,25 +87,3 @@ def submit(user_id, username):
                 if not saved:
                     raise HTTPException(409, 'Срок запроса истёк. Попробуйте снова.')
     return state(user_id)
-
-
-def grant_test_access():
-    """Temporary operator action for one already-used test account."""
-    target = os.getenv('PROFILE_SEARCH_TEST_ACCOUNT_SHA256', '')
-    if not enabled() or len(target) != 64:
-        return
-    try:
-        with job_store.connect() as db:
-            changed = db.execute("""
-                UPDATE privetek_profile_search p SET access_until=now()+interval '30 minutes'
-                FROM privetek_users u
-                WHERE u.id=p.user_id AND u.verified_at IS NOT NULL
-                  AND encode(sha256(convert_to(u.email, 'UTF8')), 'hex')=%s
-                  AND p.free_used AND p.access_until IS NULL
-                RETURNING p.user_id
-            """, (target,)).fetchall()
-            if len(changed) > 1:
-                raise ValueError('Ambiguous test account')
-        logging.getLogger('privetek').info('profile_search_test_grant_rows=%d', len(changed))
-    except Exception as error:
-        logging.getLogger('privetek').error('profile_search_test_grant_failed=%s', type(error).__name__)
