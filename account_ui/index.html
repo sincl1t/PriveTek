@@ -14,19 +14,18 @@
 <section id="dashboard" hidden><div class="dashboard-heading"><div><div class="eyebrow"><span class="dot"></span> ЛИЧНЫЙ КАБИНЕТ</div><h1>Ваши проверки</h1><p class="muted" id="account-email"></p></div><button id="new-check" class="button primary">Новая проверка <span aria-hidden="true">+</span></button></div>
 <div class="info-strip"><div><span class="strip-icon" aria-hidden="true">◷</span><span>PDF-отчёты доступны <strong>30 дней</strong></span></div><span>Скачайте нужные файлы заранее</span></div>
 <div id="jobs-card" class="jobs-card"><div class="list-heading"><h2>История проверок</h2><button id="refresh" class="text-button">Обновить ↻</button></div><p id="dashboard-message" class="message" role="status" aria-live="polite" hidden></p><div id="jobs-list" aria-live="polite"></div><div id="empty" class="empty" hidden><div class="empty-icon" aria-hidden="true">◎</div><h3>Здесь начнётся ваша история</h3><p>Запустите первую проверку, чтобы узнать больше о своём цифровом следе.</p><button id="empty-check" class="button secondary">Начать проверку →</button><p class="small">Заявки, отправленные до подключения кабинета, здесь не отображаются.</p></div><button id="load-more" class="button secondary load-more" hidden>Показать ещё</button></div>
-<section id="profile-search" class="jobs-card monitor-card" aria-labelledby="profile-search-title" hidden>
-<div class="list-heading"><h2 id="profile-search-title">Поиск профилей по username</h2></div>
-<div class="monitor-body">
-<p>Один бесплатный запрос на аккаунт. Поиск проверяет публичные профили в Bluesky, OpenStreetMap и RubyGems. В Bluesky проверяются имена в зоне bsky.social.</p>
-<p id="profile-search-access" class="small"></p>
-<form id="profile-search-form" hidden>
-<div class="field"><label for="profile-search-name">Ваш username</label><input id="profile-search-name" maxlength="65" required autocapitalize="none" autocomplete="off"></div>
-<label class="consent"><input id="profile-search-consent" type="checkbox" required><span>Проверяю свой username и согласен на передачу имени этим трём источникам.</span></label>
-<button id="profile-search-submit" class="button primary" type="submit">Найти профили</button>
+<section id="profile-search" class="jobs-card profile-chat" aria-labelledby="profile-search-title" hidden>
+<div class="list-heading"><h2 id="profile-search-title">Чат поиска профилей</h2><span id="profile-search-access" class="badge"></span></div>
+<div id="profile-search-log" class="profile-chat-log" role="log" aria-label="Сообщения поиска" tabindex="0"></div>
+<form id="profile-search-form" class="profile-chat-form" hidden>
+<label class="consent"><input id="profile-search-consent" type="checkbox" required><span>Проверяю свой username и согласен на его передачу в Bluesky, OpenStreetMap и RubyGems.</span></label>
+<div class="profile-chat-compose">
+<label for="profile-search-name" class="profile-chat-label">Ваш username</label>
+<input id="profile-search-name" placeholder="@username" maxlength="65" required autocapitalize="none" autocomplete="off" spellcheck="false">
+<button id="profile-search-submit" class="button primary" type="submit">Отправить</button>
+</div>
 </form>
-<p id="profile-search-message" class="message" role="status" hidden></p>
-<ul id="profile-search-results" aria-live="polite"></ul>
-</div></section>
+</section>
 <section class="jobs-card security-card" aria-labelledby="security-title">
 <div class="list-heading"><h2 id="security-title">Защита входа</h2><span id="mfa-status" class="badge pending">Загрузка…</span></div>
 <div class="security-content"><p>После пароля потребуется код из письма или приложения-аутентификатора. Сохраните резервные коды на случай потери доступа к выбранному способу.</p>

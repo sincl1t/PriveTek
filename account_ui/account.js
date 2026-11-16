@@ -117,62 +117,107 @@ async function openDashboard() {
 function textEl(tag, cls, text) { const el=document.createElement(tag); el.className=cls; el.textContent=text; return el; }
 function clearProfileSearch() {
   $('profile-search').hidden = true;
+  $('profile-search-form').hidden = true;
   $('profile-search-form').reset();
-  $('profile-search-results').textContent = '';
-  message('profile-search-message', '');
+  $('profile-search-log').textContent = '';
+}
+function profileBubble(text, role = 'bot', existing = null) {
+  const log = $('profile-search-log');
+  const bubble = existing || textEl('article', 'profile-chat-bubble ' + role, '');
+  bubble.textContent = '';
+  bubble.append(textEl('div', 'profile-chat-author', role === 'user' ? 'Вы' : 'PriveTek'));
+  bubble.append(textEl('p', '', text));
+  if (!existing) log.append(bubble);
+  log.scrollTop = log.scrollHeight;
+  return bubble;
 }
 function renderProfileSearch(state) {
-  $('profile-search-access').textContent = state.subscribed ? 'Подписка активна.'
-    : state.free_available ? 'Доступен один бесплатный запрос.'
-    : 'Бесплатный запрос использован. Для продолжения нужна подписка. Условия пилота уточняйте у команды PriveTek.';
+  $('profile-search-access').textContent = state.subscribed ? 'Подписка активна'
+    : state.free_available ? '1 бесплатный запрос' : 'Нужна подписка';
   $('profile-search-form').hidden = !state.free_available && !state.subscribed;
   $('profile-search-submit').disabled = state.busy;
-  if (state.busy) message('profile-search-message', 'Запрос выполняется. Обновите страницу через минуту.');
-  const items = $('profile-search-results');
-  items.textContent = '';
+}
+function showProfileResults(results, bubble, previous = false) {
+  const reply = profileBubble(previous ? 'Последний сохранённый результат.' : 'Поиск завершён.', 'bot', bubble);
+  const items = textEl('ul', 'profile-chat-results', '');
   const labels = {found: 'Найден профиль', not_found: 'Совпадений не найдено', unavailable: 'Проверка недоступна'};
-  for (const row of state.results) {
+  for (const row of results) {
     const item = textEl('li', '', row.site + ' — ' + labels[row.status]);
     if (row.url) {
       const link = textEl('a', '', 'Открыть профиль ↗');
-      link.href = row.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      link.href = row.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
       item.append(' ', link);
     }
     items.append(item);
   }
+  reply.append(items, textEl('p', 'small', 'Совпадение username не подтверждает владельца профиля.'));
+  const log = $('profile-search-log');
+  log.scrollTop = log.scrollHeight;
+}
+function promptProfileSubscription() {
+  profileBubble('Бесплатный запрос использован. Для дальнейшего поиска нужна подписка. Доступ в пилоте выдаёт команда PriveTek.');
 }
 async function loadProfileSearch(enabled) {
   clearProfileSearch();
   if (!enabled) return;
   const ticket = generation;
   $('profile-search').hidden = false;
+  $('profile-search-access').textContent = '';
+  profileBubble('Отправьте свой username. Я проверю публичные профили в Bluesky, OpenStreetMap и RubyGems. Для Bluesky поддерживаются имена в зоне bsky.social.');
   try {
-    const data = await api('profile-search');
-    if (ticket === generation) renderProfileSearch(data);
+    const state = await api('profile-search');
+    if (ticket !== generation) return;
+    renderProfileSearch(state);
+    if (state.results.length) showProfileResults(state.results, null, true);
+    if (state.busy) profileBubble('Поиск ещё выполняется. Обновите страницу через минуту.');
+    if (!state.free_available && !state.subscribed) promptProfileSubscription();
+    // Start a new visit at the greeting. Keyboard users can scroll the conversation.
+    $('profile-search-log').scrollTop = 0;
   } catch (error) {
-    if (ticket === generation) message('profile-search-message', error.message, true);
+    if (ticket === generation) profileBubble(error.message);
   }
 }
 $('profile-search-form').onsubmit = async event => {
   event.preventDefault();
   const button = $('profile-search-submit');
   if (button.disabled) return;
+  const input = $('profile-search-name');
+  const username = input.value.trim();
+  if (!username) {
+    input.focus();
+    return;
+  }
   const ticket = generation;
   button.disabled = true;
-  message('profile-search-message', 'Проверяем публичные профили…');
+  profileBubble(username, 'user');
+  const reply = profileBubble('Проверяю публичные профили…');
   try {
-    const data = await api('profile-search', {method: 'POST', body: JSON.stringify({
-      username: $('profile-search-name').value, consent: $('profile-search-consent').checked
+    const state = await api('profile-search', {method: 'POST', body: JSON.stringify({
+      username, consent: $('profile-search-consent').checked
     })});
     if (ticket !== generation) return;
     $('profile-search-form').reset();
-    renderProfileSearch(data);
-    message('profile-search-message', 'Поиск завершён. Совпадение имени не подтверждает, кому принадлежит профиль.');
+    renderProfileSearch(state);
+    showProfileResults(state.results, reply);
+    if (!state.free_available && !state.subscribed) {
+      promptProfileSubscription();
+      $('profile-search-log').focus();
+    } else input.focus();
   } catch (error) {
     if (ticket !== generation) return;
-    if (error.status !== 409) button.disabled = false;
-    if (error.status === 402) $('profile-search-form').hidden = true;
-    message('profile-search-message', error.message, true);
+    if (error.status === 401) {
+      signedOut('Сессия завершилась. Войдите снова.');
+      return;
+    }
+    if (error.status === 402) {
+      $('profile-search-access').textContent = 'Нужна подписка';
+      $('profile-search-form').hidden = true;
+      $('profile-search-log').focus();
+    }
+    button.disabled = error.status === 409;
+    profileBubble(error.message, 'bot', reply);
   }
 };
 function renderJob(job) {
