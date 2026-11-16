@@ -94,7 +94,11 @@ def test_chat_public_source_rejects_unrecognized_responses(site, response, expec
 
     async def check():
         code, content = response
-        mock = httpx.MockTransport(lambda _: httpx.Response(code, text=content, headers={'content-type': 'text/html'}))
+        def respond(request):
+            assert request.headers.get('accept') == ('*/*' if site[0] == 'Bluesky' else 'text/html')
+            return httpx.Response(code, text=content, headers={'content-type': 'text/html'})
+
+        mock = httpx.MockTransport(respond)
         async with httpx.AsyncClient(transport=mock) as client:
             return await profile_search.public_page(site, 'octocat', client)
 

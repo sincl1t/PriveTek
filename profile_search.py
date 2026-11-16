@@ -46,7 +46,7 @@ async def public_page(site, username, client):
                     if response.status_code == 400 and data.get('error') == 'InvalidRequest' and data.get('message') == 'Profile not found':
                         return dict(status='not_found')
         else:
-            response = await client.get(url)
+            response = await client.get(url, headers={'Accept': 'text/html'})
             if response.status_code == 404:
                 return dict(status='not_found')
             if response.status_code == 200 and 'text/html' in response.headers.get('content-type', ''):
@@ -82,7 +82,7 @@ async def search_sources(username):
     limiter = trio.CapacityLimiter(5)
 
     async with httpx.AsyncClient(timeout=6, follow_redirects=False, headers={
-        'User-Agent': public_sources.USER_AGENT, 'Accept': 'application/json, text/html'
+        'User-Agent': public_sources.USER_AGENT, 'Accept': 'application/json'
     }) as client:
         async def run_one(index, source, adapter):
             async with limiter:
