@@ -161,6 +161,7 @@ def cleanup():
     """Run daily and on account requests; bounded data lifetimes, not only hidden UI."""
     with job_store.connect() as db:
         db.execute('DELETE FROM privetek_account_reports WHERE expires_at <= CURRENT_TIMESTAMP')
+        db.execute('UPDATE privetek_profile_search SET ciphertext=NULL,result_until=NULL WHERE result_until <= now()')
         db.execute('DELETE FROM privetek_sessions WHERE expires_at <= CURRENT_TIMESTAMP')
         db.execute('DELETE FROM privetek_account_codes WHERE expires_at <= CURRENT_TIMESTAMP')
         db.execute('DELETE FROM privetek_mfa_setup WHERE expires_at <= CURRENT_TIMESTAMP')
