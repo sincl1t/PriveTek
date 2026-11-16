@@ -60,15 +60,48 @@ def test_search_uses_all_username_sources_and_preserves_unavailable(monkeypatch)
             raise RuntimeError('test outage')
         return {'status': 'skipped'}
 
-    async def maigret(username):
+    async def direct(source, username, _client):
         assert username == 'octocat'
-        return [dict(site=site, status='not_found', url=None) for site in profile_search.SITES]
+        if source[0] == 'GitHub':
+            return {'status': 'found', 'profile_url': 'https://github.com/octocat'}
+        return {'status': 'not_found'}
 
     monkeypatch.setattr(profile_search.public_sources, 'check_profile', check)
     monkeypatch.setattr(profile_search.discovery, 'check', check)
-    monkeypatch.setattr(profile_search, 'search_maigret', maigret)
+    monkeypatch.setattr(profile_search, 'public_page', direct)
     rows = asyncio.run(profile_search.search('octocat'))
     assert len(rows) == len({row['site'] for row in rows}) == 17
     assert rows[0] == {'site': 'GitHub', 'status': 'found', 'url': 'https://github.com/octocat'}
     assert {row['site']: row['status'] for row in rows}['Roblox'] == 'unavailable'
     assert rows[-1] == {'site': 'RubyGems', 'status': 'not_found', 'url': None}
+
+
+
+@pytest.mark.parametrize(('site', 'response', 'expected'), [
+    (('GitHub', 'https://github.com/{username}', '[a-z0-9]+'),
+     (200, '<meta name="octolytics-dimension-user_login" content="octocat"><meta property="og:url" content="https://github.com/octocat">'), 'found'),
+    (('GitHub', 'https://github.com/{username}', '[a-z0-9]+'), (403, 'blocked'), 'unavailable'),
+    (profile_search.EXTRA_SOURCES[1], (200, '<title>octocat | OpenStreetMap</title>'), 'found'),
+    (profile_search.EXTRA_SOURCES[2], (200, '<title>Profile of octocat | RubyGems.org</title>'), 'found'),
+    (profile_search.EXTRA_SOURCES[2], (200, '<title>Just a moment</title>'), 'unavailable'),
+    (profile_search.EXTRA_SOURCES[1], (404, ''), 'not_found'),
+    (profile_search.EXTRA_SOURCES[0], (400, '{"error":"InvalidRequest","message":"Profile not found"}'), 'not_found'),
+    (profile_search.EXTRA_SOURCES[0], (400, '{"error":"InvalidRequest","message":"Invalid actor"}'), 'unavailable'),
+])
+def test_chat_public_source_rejects_unrecognized_responses(site, response, expected):
+    import httpx
+    import trio
+
+    async def check():
+        code, content = response
+        def respond(request):
+            assert request.headers.get('accept') == ('*/*' if site[0] == 'Bluesky' else 'text/html')
+            return httpx.Response(code, text=content, headers={'content-type': 'text/html'})
+
+        mock = httpx.MockTransport(respond)
+        async with httpx.AsyncClient(transport=mock) as client:
+            return await profile_search.public_page(site, 'octocat', client)
+
+    result = trio.run(check)
+    assert result['status'] == expected
+    assert bool(result.get('profile_url')) == (expected == 'found')
