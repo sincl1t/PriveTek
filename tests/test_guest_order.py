@@ -52,6 +52,23 @@ def test_draft_cookie_is_encrypted_tamper_proof_and_expiring(settings,monkeypatc
     assert c.get('/api/account/draft').json()['draft'] is None
 
 
+def test_email_only_draft_continues_registration_without_starting_search(settings, monkeypatch):
+    monkeypatch.setattr(account_store, 'quota', lambda items: True)
+    reserve = MagicMock()
+    monkeypatch.setattr(server.guard, 'reserve', reserve)
+    c = client()
+    response = c.post('/account/start', data={'Email': 'owner@example.com'},
+                      headers={'Origin': 'https://privetek.ru'}, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers['location'] == '/account/register'
+    draft = c.get('/api/account/draft').json()['draft']
+    assert draft['email'] == 'owner@example.com'
+    assert draft['phone'] == '' and draft['username'] == ''
+    assert draft['additional_usernames'] == []
+    assert c.get('/api/account/me').status_code == 401
+    reserve.assert_not_called()
+
+
 def test_legacy_webhook_cannot_bypass_verification_when_accounts_enabled(settings,monkeypatch):
     reserve=MagicMock();monkeypatch.setattr(server.guard,'reserve',reserve)
     c=client();headers={'X-Webhook-Secret':'test-webhook-key'}

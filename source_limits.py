@@ -13,7 +13,7 @@ DOMAINS = (
     'instagram.com', 'haveibeenpwned.com', 'leakcheck.io', 'codeberg.org',
     'huggingface.co', 'dev.to', 'firebaseio.com', 'keybase.io', 'lichess.org',
     'chess.com', 'wikipedia.org', 'discourse.org', 'roblox.com', 'scratch.mit.edu',
-    'codewars.com',
+    'codewars.com', 'bsky.app', 'openstreetmap.org', 'rubygems.org',
 )
 INTERVAL = 1.05
 
@@ -53,8 +53,12 @@ def async_options():
     return {'event_hooks': {'request': [before_request]}} if search_queue.enabled() else {}
 
 
+def sync_options():
+    return {'event_hooks': {'request': [lambda request: wait_for_slot(request.url)]}} if search_queue.enabled() else {}
+
+
 def get(url, **kwargs):
     if not search_queue.enabled():
         return httpx.get(url, **kwargs)
-    with httpx.Client(event_hooks={'request': [lambda request: wait_for_slot(request.url)]}) as client:
+    with httpx.Client(**sync_options()) as client:
         return client.get(url, **kwargs)

@@ -123,3 +123,31 @@ def test_parallel_worker_load(queue, monkeypatch, tmp_path, capsys):
         assert conn.execute('SELECT count(*) AS n FROM privetek_search_queue WHERE payload IS NOT NULL').fetchone()['n'] == 0
     with capsys.disabled():
         print(f'Queue load: {count} orders; 12 producers {admitted_seconds:.2f}s; 8 consumers {drained_seconds:.2f}s; per-consumer={handled}; duplicates=0; outstanding=0')
+
+
+def test_chat_uses_shared_source_pacing(monkeypatch):
+    import profile_search
+    import trio
+
+    monkeypatch.setenv('SEARCH_QUEUE_ENABLED', 'true')
+    monkeypatch.setattr(profile_search.public_sources, 'SOURCES', [])
+    monkeypatch.setattr(profile_search.discovery, 'SOURCES', [])
+    monkeypatch.setattr(profile_search, 'EXTRA_SOURCES', profile_search.EXTRA_SOURCES[:1])
+    acquired = []
+    monkeypatch.setattr(source_limits, 'wait_for_slot', lambda url: acquired.append(url.host))
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(profile_search.httpx, 'AsyncClient', lambda **kwargs: real_client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(
+            400, json={'error': 'InvalidRequest', 'message': 'Profile not found'})),
+        **kwargs))
+    result = trio.run(profile_search.search_sources, 'synthetic')
+    assert result[0]['status'] == 'not_found'
+    assert acquired == ['public.api.bsky.app']
+
+
+@pytest.mark.parametrize('host', ['public.api.bsky.app', 'www.openstreetmap.org', 'rubygems.org'])
+def test_current_chat_domains_have_shared_limits(monkeypatch, host):
+    calls = []
+    monkeypatch.setattr(source_limits, 'try_acquire', lambda source: calls.append(source) or True)
+    source_limits.wait_for_slot(httpx.URL('https://' + host + '/'))
+    assert len(calls) == 1

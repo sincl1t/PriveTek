@@ -78,6 +78,13 @@ def build(data, email=None, phone=None, username=None, additional_usernames=None
         observation = dict(status=row['status'], checked_at=row.get('checked_at'), reason=str(row.get('reason', ''))[:1000])
         if observation not in nodes[node_id]['observations']:
             nodes[node_id]['observations'].append(observation)
+    for item in nodes.values():
+        if item['source'] == 'HIBP' and item['kind'] == 'breach':
+            from tools.breach_index import valid_name
+            item['breach_names'] = list(dict.fromkeys(
+                row['name'] for row in (data.get('email_breach') or [])
+                if row.get('source') == 'HIBP' and valid_name(row.get('name'))
+            ))
     snapshot = dict(version=1, revision=1, identifiers=identifiers, findings=list(nodes.values()),
                     omitted=discarded, automatic_person_merges=0, coverage=coverage(data.get('checks', [])))
     return summarize(snapshot)

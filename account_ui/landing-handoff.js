@@ -1,51 +1,186 @@
-/* PriveTek landing form: native POST; no contacts in URLs or JS storage. */
+/* Guided landing chat. Contacts stay in the page until a native POST to the account. */
 'use strict';
-(function(){
- function mount(){
-  const original=document.getElementById('form2008423781');
-  if(!original || original.dataset.privetekHandoff==='yes')return;
-  const emailTemplate=original.elements.namedItem('Email');
-  if(!emailTemplate)return;
-  const textColor=getComputedStyle(emailTemplate).color;
-  const form=original.cloneNode(true);
-  form.classList.remove('js-form-proccess');
-  for(const attr of Array.from(form.attributes))if(attr.name.startsWith('data-'))form.removeAttribute(attr.name);
-  form.dataset.privetekHandoff='yes';form.action='https://lk.privetek.ru/account/start';form.method='post';form.target='_self';form.enctype='application/x-www-form-urlencoded';
-  for(const input of Array.from(form.querySelectorAll('input[type="hidden"],input[name="form-spec-comments"]')))input.remove();
-  const savedPhone=original.elements.namedItem('Phone');
-  const visiblePhone=form.querySelector('input[type="tel"]');
-  if(visiblePhone){
-   const block=visiblePhone.closest('.t-input-block');
-   if(!block)return;
-   const phone=document.createElement('input');phone.style.cssText=emailTemplate.style.cssText;phone.style.color=textColor;phone.type='tel';phone.name='Phone';phone.className='t-input t-input_bbonly';phone.placeholder='+7 912 345-67-89';phone.maxLength=40;phone.autocomplete='tel';phone.value=(savedPhone && savedPhone.value)||visiblePhone.value||'';phone.setAttribute('aria-label','Телефон · необязательно');
-   block.textContent='';block.append(phone);
+(() => {
+  function mount() {
+    const original = document.getElementById('form2008423781');
+    if (!original || original.dataset.privetekHandoff === 'yes') return;
+    const emailTemplate = original.elements?.namedItem('Email');
+    if (!emailTemplate) return;
+    const color = getComputedStyle(emailTemplate).color;
+    const root = document.createElement('div');
+    root.id = original.id;
+    root.dataset.privetekHandoff = 'yes';
+    root.className = 'privetek-landing-chat';
+    const style = document.createElement('style');
+    style.textContent = `
+      .privetek-landing-chat{color:inherit;width:100%;min-width:0;font-family:'TildaSans',Arial,sans-serif;text-align:left}
+      .privetek-landing-chat *{box-sizing:border-box}
+      .privetek-landing-chat-log{max-height:420px;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:4px 2px 18px}
+      .privetek-landing-chat-bubble{max-width:94%;padding:16px 18px;border-radius:18px 18px 18px 4px;background:#efedf9;line-height:1.6;color:#171452;font-size:16px;overflow-wrap:anywhere}
+      .privetek-landing-chat-bubble.user{align-self:flex-end;background:#dff5f3;border-radius:18px 18px 4px 18px}
+      .privetek-landing-chat-author{font-size:13px;font-weight:700;margin-bottom:5px}
+      .privetek-landing-chat p{margin:0}
+      .privetek-landing-chat input{width:100%;min-width:0;padding:15px;border:1px solid #b4b1cc;border-radius:14px;background:#fff;color:#171452;font:inherit;font-size:16px;margin:8px 0 12px}
+      .privetek-landing-chat label{display:block;font-size:14px;line-height:1.5}
+      .privetek-landing-chat button{display:inline-block;min-height:48px;padding:14px 20px;border-radius:28px;border:1px solid #8bf8f4;background:#8bf8f4;color:#171452;font:inherit;font-size:16px;cursor:pointer;white-space:normal}
+      .privetek-landing-chat-options{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+      .privetek-landing-chat-options button{background:#fff;color:#171452}
+      .privetek-landing-chat [hidden]{display:none!important}
+      .privetek-landing-chat button:focus-visible,.privetek-landing-chat input:focus-visible{outline:3px solid #21a8af;outline-offset:3px}
+      .privetek-landing-chat-note{font-size:14px;line-height:1.6;margin-top:18px!important}
+      .privetek-landing-chat-error{color:#a12a36;margin-bottom:12px!important}
+      @media(max-width:480px){.privetek-landing-chat-options button{width:100%}.privetek-landing-chat-bubble{max-width:100%;padding:13px 15px}}
+    `;
+    root.style.color = color;
+    const create = (tag, cls, text) => {
+      const node = document.createElement(tag);
+      node.className = cls;
+      node.textContent = text;
+      return node;
+    };
+    const log = create('div', 'privetek-landing-chat-log', '');
+    log.setAttribute('role', 'log');
+    log.setAttribute('aria-label', 'Чат подготовки проверки');
+    log.tabIndex = 0;
+    const options = create('div', 'privetek-landing-chat-options', '');
+    const form = document.createElement('form');
+    form.noValidate = false;
+    const label = create('label', '', 'Ваш email');
+    const input = document.createElement('input');
+    input.id = 'privetek-chat-answer';
+    input.required = true;
+    input.maxLength = 254;
+    label.htmlFor = input.id;
+    input.setAttribute('aria-describedby', 'privetek-chat-error');
+    const error = create('p', 'privetek-landing-chat-error', '');
+    error.id = 'privetek-chat-error';
+    error.setAttribute('role', 'status');
+    error.hidden = true;
+    const send = create('button', '', 'Отправить');
+    send.type = 'submit';
+    form.append(label, input, error, send);
+    const note = create('p', 'privetek-landing-chat-note',
+      'Перед запуском проверки потребуется подтвердить email и войти в кабинет или создать аккаунт. Заявка сохранится на один час.');
+    const alternative = create('a', '', 'Продолжить в личном кабинете');
+    alternative.href = 'https://lk.privetek.ru/account/start';
+    alternative.style.cssText = 'display:block;margin-top:14px;text-decoration:underline;color:inherit;font-size:14px';
+    root.append(style, log, options, form, note, alternative);
+
+    let step, email, phone, names;
+    function bubble(text, user = false) {
+      const item = create('div', 'privetek-landing-chat-bubble' + (user ? ' user' : ''), '');
+      item.append(create('div', 'privetek-landing-chat-author', user ? 'Вы' : 'PriveTek'), create('p', '', text));
+      log.append(item);
+      log.scrollTop = log.scrollHeight;
+    }
+    function action(text, callback) {
+      const button = create('button', '', text);
+      button.type = 'button';
+      button.onclick = callback;
+      options.append(button);
+    }
+    function ask(next, text, title, type, placeholder) {
+      step = next;
+      options.textContent = '';
+      error.hidden = true;
+      error.textContent = '';
+      form.hidden = !title;
+      input.value = '';
+      input.type = type || 'text';
+      input.autocomplete = next === 'email' ? 'email' : next === 'phone' ? 'tel' : 'off';
+      input.inputMode = next === 'phone' ? 'tel' : next === 'email' ? 'email' : 'text';
+      input.autocapitalize = 'none';
+      input.spellcheck = false;
+      label.textContent = title || 'Ваш ответ';
+      input.placeholder = placeholder || '';
+      bubble(text);
+    }
+    function reset() {
+      email = ''; phone = ''; names = [];
+      log.textContent = '';
+      ask('email', 'Помогу проверить ваш цифровой след. Начнём с вашей почты, затем уточним телефон и username. На выходе получите разбор находок, ограничения проверки и полный PDF.', 'Ваш email', 'email', 'you@example.com');
+    }
+    function continueInAccount() {
+      if (!['choice', 'review'].includes(step)) return;
+      step = 'sending';
+      options.querySelectorAll('button').forEach(button => { button.disabled = true; });
+      const transfer = document.createElement('form');
+      transfer.method = 'post';
+      transfer.action = 'https://lk.privetek.ru/account/start';
+      transfer.target = '_self';
+      transfer.enctype = 'application/x-www-form-urlencoded';
+      transfer.hidden = true;
+      for (const [key, value] of Object.entries({
+        Name: '', Email: email, Phone: phone, Username: names[0] || '',
+        AdditionalUsername1: names[1] || '', AdditionalUsername2: names[2] || ''
+      })) {
+        const field = document.createElement('input');
+        field.type = 'hidden'; field.name = key; field.value = value;
+        transfer.append(field);
+      }
+      root.append(transfer);
+      HTMLFormElement.prototype.submit.call(transfer);
+    }
+    function review() {
+      ask('review', 'Подготовили заявку: email ' + email + ', телефон ' + phone +
+        (names.length ? ', username: ' + names.join(', ') : '. Username не указан') +
+        '. Продолжим в защищённом кабинете. Передадим введённые данные в PriveTek и сохраним заявку на один час; согласие на поиск по внешним источникам вы дадите перед запуском.');
+      action('Продолжить и подтвердить почту', continueInAccount);
+      action('Изменить данные', reset);
+    }
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!form.reportValidity()) return;
+      const value = input.value.trim();
+      error.hidden = true;
+      if (step === 'email') {
+        email = value;
+        bubble(value, true);
+        ask('choice', 'Где продолжим? Можно создать личный кабинет с этой почтой или заполнить заявку в чате на сайте. В кабинете потребуется подтвердить email. Поиск запускается после вашего согласия.');
+        action('Создать ЛК и продолжить в нём', continueInAccount);
+        action('Остаться на сайте', () => {
+          if (step !== 'choice') return;
+          bubble('Остаться на сайте', true);
+          ask('phone', 'Продолжим здесь. Укажите свой телефон с кодом страны. Сейчас поиск по телефону проверяет признак регистрации в Amazon; больше находок номер не гарантирует.', 'Ваш телефон', 'tel', '+7 912 345-67-89');
+        });
+      } else if (step === 'phone') {
+        if (!/^\+[0-9\s().-]{7,39}$/.test(value)) {
+          error.textContent = 'Укажите номер с кодом страны, начиная с +.';
+          error.hidden = false;
+          return;
+        }
+        phone = value;
+        bubble('Телефон добавлен', true);
+        ask('usernames', 'Какие username вы используете? Можно указать до трёх вариантов через пробел или запятую.', 'Ваши username', 'text', '@username, another_name');
+        action('Пропустить username', review);
+      } else if (step === 'usernames') {
+        const values = [...new Set(value.split(/[,\s]+/).filter(Boolean).map(name => name.replace(/^@/, '')))];
+        if (!values.length || values.length > 3 || values.some(name => !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name))) {
+          error.textContent = 'Укажите до трёх username без ссылок, до 64 латинских букв, цифр, точек, дефисов и подчёркиваний.';
+          error.hidden = false;
+          return;
+        }
+        names = values;
+        bubble(names.join(', '), true);
+        review();
+      }
+    });
+    reset();
+    original.replaceWith(root);
+    const record = document.getElementById('rec2008423781');
+    const title = record?.querySelector('[field="title"]');
+    if (title) { title.textContent = 'Проверьте свой цифровой след в чате'; title.style.color = color; }
+    const bottom = record?.querySelector('[field="text2"]');
+    if (bottom) {
+      bottom.textContent = 'Подтверждение email не подтверждает владение телефоном или профилями. ';
+      bottom.style.color = color;
+      const privacy = create('a', '', 'Политика конфиденциальности');
+      privacy.href = 'https://privetek.ru/page137765066.html';
+      privacy.style.color = color;
+      bottom.append(privacy);
+    }
   }
-  const limits={Name:120,Email:254,Phone:40,Username:65};
-  for(const [name,limit] of Object.entries(limits)){
-   const input=form.elements.namedItem(name);if(!input)return;
-   input.maxLength=limit;input.required=name==='Email';input.classList.remove('js-tilda-rule');
-   input.setAttribute('aria-label',{Name:'Имя · необязательно',Email:'Ваш email',Phone:'Телефон · необязательно',Username:'Username · необязательно'}[name]);
-   if(name==='Username'){input.autocapitalize='none';input.spellcheck=false;}
-  }
-  const button=form.querySelector('button[type="submit"]');if(!button)return;
-  button.textContent='Продолжить →';
-  button.style.color='#16124f';button.style.backgroundColor='#8bf8f4';button.style.border='1px solid #8bf8f4';button.style.borderRadius='999px';button.style.whiteSpace='normal';button.style.maxWidth='100%';
-  const note=document.createElement('p');note.className='t-text t-text_xs';note.id='privetek-handoff-note';note.textContent='Для получения отчёта потребуется подтвердить email и создать аккаунт или войти. Данные сохранятся на один час. Поиск начнётся после вашего подтверждения в ЛК.';note.style.margin='18px 0';note.style.color=textColor;note.style.fontSize='14px';note.style.lineHeight='1.6';note.setAttribute('role','note');button.parentNode.insertBefore(note,button);
-  const alternative=document.createElement('a');alternative.href='https://lk.privetek.ru/account/start';alternative.textContent='Открыть форму отдельно';alternative.className='t-text t-text_xs';alternative.style.color=textColor;alternative.style.textDecoration='underline';alternative.style.display='block';alternative.style.marginTop='18px';form.append(alternative);
-  window.addEventListener('submit',event=>{
-   if(event.target!==form)return;
-   event.preventDefault();event.stopImmediatePropagation();
-   if(form.reportValidity())HTMLFormElement.prototype.submit.call(form);
-  },true);
-  original.replaceWith(form);
-  const record=document.getElementById('rec2008423781');
-  const title=record && record.querySelector('[field="title"]');if(title){title.textContent='Начните проверку своих данных';title.style.color=textColor;}
-  const bottom=record && record.querySelector('[field="text2"]');
-  if(bottom){
-   bottom.style.color=textColor;
-   bottom.textContent='Сейчас мы сохраним заявку для продолжения в ЛК. Согласие на поиск и передачу данных источникам вы дадите перед запуском. Подтверждение email не подтверждает владение телефоном или профилями. ';
-   const privacy=document.createElement('a');privacy.href='https://privetek.ru/page137765066.html';privacy.textContent='Политика конфиденциальности';privacy.style.color=textColor;privacy.style.textDecoration='underline';bottom.append(privacy);
-  }
- }
- if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount);else mount();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);
+  else mount();
 })();
