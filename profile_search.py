@@ -124,8 +124,6 @@ def submit(user_id, username):
             FROM privetek_profile_search WHERE user_id=%s FOR UPDATE''', (user_id,)).fetchone()
         if row['busy']:
             raise HTTPException(409, 'Один поиск уже выполняется.')
-        if row['free_used'] and not row['subscribed']:
-            raise HTTPException(402, 'Бесплатный запрос уже использован. Для новых запросов нужна подписка.')
         db.execute("UPDATE privetek_profile_search SET lease_token=%s, lease_until=now()+interval '60 seconds' WHERE user_id=%s",
                    (token, user_id))
     payload = None

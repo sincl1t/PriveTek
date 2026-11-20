@@ -10,7 +10,7 @@ def test_profile_search_disabled_by_default(settings, monkeypatch):
     assert client().get('/api/account/profile-search').status_code == 404
 
 
-def test_db_profile_search_free_failure_repeat_and_subscription(db, monkeypatch):
+def test_db_profile_search_repeat_without_subscription(db, monkeypatch):
     monkeypatch.setenv('PROFILE_SEARCH_ENABLED', 'true')
     c = client()
     register(c, db)
@@ -37,8 +37,8 @@ def test_db_profile_search_free_failure_repeat_and_subscription(db, monkeypatch)
     assert response.status_code == 200
     assert not response.json()['free_available']
     assert response.json() == c.get(url).json()
-    assert c.post(url, json=body, headers=headers).status_code == 402
-    assert len(calls) == 2
+    assert c.post(url, json=body, headers=headers).status_code == 200
+    assert len(calls) == 3
     with job_store.connect() as conn:
         saved = conn.execute('SELECT ciphertext FROM privetek_profile_search').fetchone()
         assert b'rubygems.org' not in bytes(saved['ciphertext'])
@@ -46,7 +46,7 @@ def test_db_profile_search_free_failure_repeat_and_subscription(db, monkeypatch)
     assert c.post(url, json=body, headers=headers).status_code == 200
     with job_store.connect() as conn:
         conn.execute("UPDATE privetek_profile_search SET access_until=now()-interval '1 minute'")
-    assert c.post(url, json=body, headers=headers).status_code == 402
+    assert c.post(url, json=body, headers=headers).status_code == 200
 
 
 def test_search_uses_all_username_sources_and_preserves_unavailable(monkeypatch):

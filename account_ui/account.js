@@ -229,9 +229,8 @@ function profileBubble(text, role = 'bot', existing = null) {
   return bubble;
 }
 function renderProfileSearch(state) {
-  $('profile-search-access').textContent = state.subscribed ? 'Подписка активна'
-    : state.free_available ? '1 бесплатный запрос' : 'Нужна подписка';
-  $('profile-search-form').hidden = !state.free_available && !state.subscribed;
+  $('profile-search-access').textContent = 'Поиск доступен';
+  $('profile-search-form').hidden = false;
   $('profile-search-submit').disabled = state.busy;
 }
 function showProfileResults(results, bubble, previous = false) {
@@ -255,9 +254,6 @@ function showProfileResults(results, bubble, previous = false) {
   const log = $('profile-search-log');
   log.scrollTop = log.scrollHeight;
 }
-function promptProfileSubscription() {
-  profileBubble('Бесплатный запрос использован. Для дальнейшего поиска нужна подписка. Доступ в пилоте выдаёт команда PriveTek.');
-}
 async function loadProfileSearch(enabled) {
   clearProfileSearch();
   if (!enabled) return;
@@ -271,7 +267,6 @@ async function loadProfileSearch(enabled) {
     renderProfileSearch(state);
     if (state.results.length) showProfileResults(state.results, null, true);
     if (state.busy) profileBubble('Поиск ещё выполняется. Обновите страницу через минуту.');
-    if (!state.free_available && !state.subscribed) promptProfileSubscription();
     // Start a new visit at the greeting. Keyboard users can scroll the conversation.
     $('profile-search-log').scrollTop = 0;
   } catch (error) {
@@ -300,20 +295,12 @@ $('profile-search-form').onsubmit = async event => {
     $('profile-search-form').reset();
     renderProfileSearch(state);
     showProfileResults(state.results, reply);
-    if (!state.free_available && !state.subscribed) {
-      promptProfileSubscription();
-      $('profile-search-log').focus();
-    } else input.focus();
+    input.focus();
   } catch (error) {
     if (ticket !== generation) return;
     if (error.status === 401) {
       signedOut('Сессия завершилась. Войдите снова.');
       return;
-    }
-    if (error.status === 402) {
-      $('profile-search-access').textContent = 'Нужна подписка';
-      $('profile-search-form').hidden = true;
-      $('profile-search-log').focus();
     }
     button.disabled = error.status === 409;
     profileBubble(error.message, 'bot', reply);
