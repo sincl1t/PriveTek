@@ -13,7 +13,7 @@
     root.className = 'privetek-landing-chat';
     const style = document.createElement('style');
     style.textContent = `
-      .privetek-landing-chat{color:inherit;width:100%;min-width:0;font-family:inherit;text-align:left}
+      .privetek-landing-chat{color:inherit;width:100%;min-width:0;font-family:'TildaSans',Arial,sans-serif;text-align:left}
       .privetek-landing-chat *{box-sizing:border-box}
       .privetek-landing-chat-log{max-height:420px;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:4px 2px 18px}
       .privetek-landing-chat-bubble{max-width:94%;padding:16px 18px;border-radius:18px 18px 18px 4px;background:#efedf9;line-height:1.6;color:#171452;font-size:16px;overflow-wrap:anywhere}
@@ -22,7 +22,7 @@
       .privetek-landing-chat p{margin:0}
       .privetek-landing-chat input{width:100%;min-width:0;padding:15px;border:1px solid #b4b1cc;border-radius:14px;background:#fff;color:#171452;font:inherit;font-size:16px;margin:8px 0 12px}
       .privetek-landing-chat label{display:block;font-size:14px;line-height:1.5}
-      .privetek-landing-chat button{display:inline-block;min-height:48px;padding:14px 20px;border-radius:28px;border:1px solid #171452;background:#171452;color:#fff;font:inherit;font-size:16px;cursor:pointer;white-space:normal}
+      .privetek-landing-chat button{display:inline-block;min-height:48px;padding:14px 20px;border-radius:28px;border:1px solid #8bf8f4;background:#8bf8f4;color:#171452;font:inherit;font-size:16px;cursor:pointer;white-space:normal}
       .privetek-landing-chat-options{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
       .privetek-landing-chat-options button{background:#fff;color:#171452}
       .privetek-landing-chat [hidden]{display:none!important}
