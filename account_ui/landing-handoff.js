@@ -100,31 +100,32 @@
       log.textContent = '';
       ask('email', 'Помогу проверить ваш цифровой след. Начнём с вашей почты, затем уточним телефон и username. На выходе получите разбор находок, ограничения проверки и полный PDF.', 'Ваш email', 'email', 'you@example.com');
     }
+    function continueInAccount() {
+      if (!['choice', 'review'].includes(step)) return;
+      step = 'sending';
+      options.querySelectorAll('button').forEach(button => { button.disabled = true; });
+      const transfer = document.createElement('form');
+      transfer.method = 'post';
+      transfer.action = 'https://lk.privetek.ru/account/start';
+      transfer.target = '_self';
+      transfer.enctype = 'application/x-www-form-urlencoded';
+      transfer.hidden = true;
+      for (const [key, value] of Object.entries({
+        Name: '', Email: email, Phone: phone, Username: names[0] || '',
+        AdditionalUsername1: names[1] || '', AdditionalUsername2: names[2] || ''
+      })) {
+        const field = document.createElement('input');
+        field.type = 'hidden'; field.name = key; field.value = value;
+        transfer.append(field);
+      }
+      root.append(transfer);
+      HTMLFormElement.prototype.submit.call(transfer);
+    }
     function review() {
       ask('review', 'Подготовили заявку: email ' + email + ', телефон ' + phone +
         (names.length ? ', username: ' + names.join(', ') : '. Username не указан') +
         '. Продолжим в защищённом кабинете. Передадим введённые данные в PriveTek и сохраним заявку на один час; согласие на поиск по внешним источникам вы дадите перед запуском.');
-      action('Продолжить и подтвердить почту', () => {
-        if (step !== 'review') return;
-        step = 'sending';
-        options.querySelectorAll('button').forEach(button => { button.disabled = true; });
-        const transfer = document.createElement('form');
-        transfer.method = 'post';
-        transfer.action = 'https://lk.privetek.ru/account/start';
-        transfer.target = '_self';
-        transfer.enctype = 'application/x-www-form-urlencoded';
-        transfer.hidden = true;
-        for (const [key, value] of Object.entries({
-          Name: '', Email: email, Phone: phone, Username: names[0] || '',
-          AdditionalUsername1: names[1] || '', AdditionalUsername2: names[2] || ''
-        })) {
-          const field = document.createElement('input');
-          field.type = 'hidden'; field.name = key; field.value = value;
-          transfer.append(field);
-        }
-        root.append(transfer);
-        HTMLFormElement.prototype.submit.call(transfer);
-      });
+      action('Продолжить и подтвердить почту', continueInAccount);
       action('Изменить данные', reset);
     }
     form.addEventListener('submit', event => {
@@ -136,7 +137,13 @@
       if (step === 'email') {
         email = value;
         bubble(value, true);
-        ask('phone', 'Укажите свой телефон с кодом страны. Сейчас поиск по телефону проверяет признак регистрации в Amazon; больше находок номер не гарантирует.', 'Ваш телефон', 'tel', '+7 912 345-67-89');
+        ask('choice', 'Где продолжим? Можно создать личный кабинет с этой почтой или заполнить заявку в чате на сайте. В кабинете потребуется подтвердить email. Поиск запускается после вашего согласия.');
+        action('Создать ЛК и продолжить в нём', continueInAccount);
+        action('Остаться на сайте', () => {
+          if (step !== 'choice') return;
+          bubble('Остаться на сайте', true);
+          ask('phone', 'Продолжим здесь. Укажите свой телефон с кодом страны. Сейчас поиск по телефону проверяет признак регистрации в Amazon; больше находок номер не гарантирует.', 'Ваш телефон', 'tel', '+7 912 345-67-89');
+        });
       } else if (step === 'phone') {
         if (!/^\+[0-9\s().-]{7,39}$/.test(value)) {
           error.textContent = 'Укажите номер с кодом страны, начиная с +.';
