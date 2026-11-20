@@ -259,3 +259,39 @@ body.dialog-open { overflow: hidden; }
 @media (max-width: 420px) {
   .profile-chat-compose { grid-template-columns: minmax(0, 1fr); }
 }
+
+.account-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0 0 24px;
+  padding: 7px;
+  border: 1px solid #ffffff40;
+  border-radius: 20px;
+  background: #ffffff0d;
+}
+.account-tabs [role="tab"] {
+  flex: 1 0 auto;
+  padding: 13px 18px;
+  min-height: 46px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.account-tabs [aria-selected="true"] {
+  background: #fff;
+  color: var(--ink);
+  font-weight: 700;
+}
+.account-tabs [role="tab"]:focus-visible,
+[role="tabpanel"]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+@media (max-width: 640px) {
+  .account-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+  .account-tabs [role="tab"] { padding: 12px 8px; font-size: 14px; }
+}

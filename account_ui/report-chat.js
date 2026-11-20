@@ -111,7 +111,7 @@
           ? 'Разбор пока недоступен. Откройте статус заявки в истории или повторите получение результата.'
           : error.message);
         button('Получить результат', () => poll(ticket));
-        button('Открыть историю', () => $('jobs-card').scrollIntoView({behavior: 'smooth'}));
+        button('Открыть историю', () => openAccountTab('reports', true));
       }
     }
   }

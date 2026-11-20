@@ -349,7 +349,7 @@ async function loadJobs(reset=false) {
 }
 $('refresh').onclick=()=>loadJobs(true); $('load-more').onclick=()=>loadJobs(false);
 $('logout').onclick=async()=>{ $('logout').disabled=true; try{await api('auth/logout',{method:'POST',body:'{}'}); signedOut('Вы вышли из кабинета.');}catch(error){handleDashboardError(error);}finally{$('logout').disabled=false;} };
-function openCheck(){draftInForm=null; trackEvent('report_form_open'); message('check-message',''); openDialog('check-dialog'); $('check-dialog').scrollTop=0;}
+function openCheck(){openAccountTab('reports');draftInForm=null; trackEvent('report_form_open'); message('check-message',''); openDialog('check-dialog'); $('check-dialog').scrollTop=0;}
 $('new-check').onclick=openCheck; $('empty-check').onclick=openCheck; $('close-check').onclick=()=>closeDialog('check-dialog');
 $('check-form').onsubmit=async event=>{
   event.preventDefault(); if (!validateCheckForm()) { $('check-form').reportValidity(); return; } $('check-submit').disabled=true; message('check-message','');
@@ -366,6 +366,7 @@ function clearMfaSecrets() {
 }
 function showRecovery(codes) {
   $('mfa-codes-text').textContent=codes.join('\n'); $('mfa-recovery-codes').hidden=!codes.length;
+  if(codes.length) openAccountTab('security');
   if(codes.length) $('mfa-recovery-codes').scrollIntoView({block:'nearest'});
 }
 async function loadSecurity() {
