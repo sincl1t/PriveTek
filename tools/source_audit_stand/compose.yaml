@@ -1,0 +1,36 @@
+name: privetek-source-audit
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: privetek_test
+      POSTGRES_PASSWORD: local-source-audit
+      POSTGRES_DB: postgres
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U privetek_test -d postgres']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  app:
+    build:
+      context: ../..
+      dockerfile: tools/source_audit_stand/Dockerfile
+    environment:
+      STAND_DATABASE_BASE: postgresql://privetek_test:local-source-audit@db:5432
+      STAND_ARTIFACTS: /artifacts
+    ports:
+      - '127.0.0.1:8443:8443'
+    volumes:
+      - ./artifacts:/artifacts
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Accounts are ready only after provisioning.
+      test: [CMD, python, -c, 'from pathlib import Path; import ssl, urllib.request; assert Path("/tmp/source-audit-ready").exists(); urllib.request.urlopen("https://127.0.0.1:8443/", context=ssl._create_unverified_context(), timeout=3)']
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    stop_grace_period: 45s

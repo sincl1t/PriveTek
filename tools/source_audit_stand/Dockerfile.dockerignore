@@ -1,0 +1,12 @@
+.git
+.venv
+venv
+.env
+.env.*
+.agents
+.codex
+.aws
+reports
+**/__pycache__
+.pytest_cache
+tools/source_audit_stand/artifacts
