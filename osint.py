@@ -4,6 +4,7 @@ import hibp_client
 import leakcheck_client
 from public_sources import SOURCES, run_profiles
 import httpx
+import source_limits
 import phonenumbers
 import trio
 from search_inputs import normalize_phone, normalize_username, normalize_usernames
@@ -13,7 +14,7 @@ from source_checks import instagram, amazon_email as holehe_amazon, amazon_phone
 
 async def run_checks(checks, arguments):
     output = []
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+    async with httpx.AsyncClient(**source_limits.async_options(), timeout=15, follow_redirects=True) as client:
         for label, check in checks:
             partial = []
             try:

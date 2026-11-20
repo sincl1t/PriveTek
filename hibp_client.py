@@ -2,6 +2,7 @@
 import os
 from urllib.parse import quote
 import httpx
+import source_limits
 
 
 def lookup(email, api_key=None):
@@ -11,7 +12,7 @@ def lookup(email, api_key=None):
     if not key:
         return result('skipped', 'Не настроен ключ API; проверка утечек не выполнялась.')
     try:
-        response = httpx.get('https://haveibeenpwned.com/api/v3/breachedaccount/' + quote(email, safe=''),
+        response = source_limits.get('https://haveibeenpwned.com/api/v3/breachedaccount/' + quote(email, safe=''),
                              headers={'hibp-api-key': key, 'user-agent': 'PriveTek/0.2'},
                              params={'truncateResponse': 'false', 'includeUnverified': 'false'}, timeout=20)
     except httpx.RequestError:

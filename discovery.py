@@ -9,6 +9,7 @@ import threading
 import time
 from urllib.parse import quote
 import httpx
+import source_limits
 import trio
 from report_data import utc_now
 
@@ -126,7 +127,7 @@ async def check(source, username, client):
 
 async def run(username=None, fixtures=False):
     # Sequential, bounded work; no fan-out to unapproved hosts and no retries.
-    async with httpx.AsyncClient(timeout=12, follow_redirects=False, headers={
+    async with httpx.AsyncClient(**source_limits.async_options(), timeout=12, follow_redirects=False, headers={
         'User-Agent': 'PriveTek/3.0 (+https://github.com/sincl1t/PriveTek)', 'Accept': 'application/json'}) as client:
         return [await check(source, source[3] if fixtures else username, client) for source in SOURCES]
 

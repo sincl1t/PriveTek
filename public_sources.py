@@ -2,6 +2,7 @@
 import re
 from urllib.parse import quote
 import httpx
+import source_limits
 import trio
 from report_data import utc_now
 
@@ -152,7 +153,7 @@ async def check_profile(source, username, client):
 async def run_profiles(username=None, fixtures=False):
     output = [None] * len(SOURCES)
     limiter = trio.CapacityLimiter(4)
-    async with httpx.AsyncClient(timeout=12, follow_redirects=False, headers={'User-Agent': USER_AGENT, 'Accept': 'application/json'}) as client:
+    async with httpx.AsyncClient(**source_limits.async_options(), timeout=12, follow_redirects=False, headers={'User-Agent': USER_AGENT, 'Accept': 'application/json'}) as client:
         async def run(index, source):
             async with limiter:
                 output[index] = await check_profile(source, source[3] if fixtures else username, client)
