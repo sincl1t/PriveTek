@@ -106,7 +106,7 @@ $('auth-form').onsubmit = async event => {
   } catch (error) { message('auth-message',error.message,true); }
   finally { authBusy=false; $('auth-submit').disabled=false; }
 };
-function signedOut(notice='') { clearProfileSearch(); $('counterparty-form').reset(); $('link-check-form').reset(); $('link-check-result').textContent=''; closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode(location.pathname==='/account/register'?'register':'login',notice); updateDraftNotice(); }
+function signedOut(notice='') { clearProfileSearch(); document.dispatchEvent(new Event('account-signed-out')); $('counterparty-form').reset(); $('link-check-form').reset(); $('link-check-result').textContent=''; closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode(location.pathname==='/account/register'?'register':'login',notice); updateDraftNotice(); }
 
 function assessLink(value) {
   const address = value.trim();
