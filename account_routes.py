@@ -311,7 +311,7 @@ def page():
 
 @router.get('/account/assets/{name}', include_in_schema=False)
 def asset(name: str):
-    allowed = {'report-chat.js':'application/javascript', 'start.js':'application/javascript', 'landing-handoff.js':'application/javascript', 'account.css': 'text/css', 'account.js': 'application/javascript',
+    allowed = {'account-nav.js':'application/javascript', 'report-chat.js':'application/javascript', 'start.js':'application/javascript', 'landing-handoff.js':'application/javascript', 'account.css': 'text/css', 'account.js': 'application/javascript',
                'brand-logo.png': 'image/png', 'brand-background.jpg': 'image/jpeg',
                'tildasans.woff2': 'font/woff2'}
     if name not in allowed:
