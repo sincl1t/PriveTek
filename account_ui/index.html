@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ru">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Личный кабинет — PriveTek</title><link rel="stylesheet" href="/account/assets/account.css"><script src="/account/assets/account.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Личный кабинет — PriveTek</title><link rel="stylesheet" href="/account/assets/account.css"><script src="/account/assets/account.js" defer></script><script src="/account/assets/report-chat.js" defer></script></head>
 <body>
 <header class="header"><a href="https://privetek.ru/" class="brand" aria-label="PriveTek — на главную страницу"><img class="brand-logo" src="/account/assets/brand-logo.png" alt="PriveTek — сервис контроля цифрового следа" width="235" height="62"><span class="brand-caption">Личный кабинет</span></a><div class="header-right"><span class="secure"><span aria-hidden="true">◇</span> Защищённый кабинет</span><button id="logout" class="text-button" hidden>Выйти</button></div></header>
 <main><aside id="draft-banner" class="draft-banner" hidden><h2>Ваша заявка сохранена</h2><p id="draft-notice"></p><div class="draft-actions"><button id="continue-draft" class="button secondary" type="button" hidden>Продолжить заявку</button><a href="/account/start">Изменить данные</a><button id="discard-draft" class="text-button" type="button">Отменить заявку</button></div></aside>
@@ -13,9 +13,20 @@
 </section>
 <section id="dashboard" hidden><div class="dashboard-heading"><div><div class="eyebrow"><span class="dot"></span> ЛИЧНЫЙ КАБИНЕТ</div><h1>Ваши проверки</h1><p class="muted" id="account-email"></p></div><button id="new-check" class="button primary">Новая проверка <span aria-hidden="true">+</span></button></div>
 <div class="info-strip"><div><span class="strip-icon" aria-hidden="true">◷</span><span>PDF-отчёты доступны <strong>30 дней</strong></span></div><span>Скачайте нужные файлы заранее</span></div>
+<section class="jobs-card profile-chat" aria-labelledby="report-chat-title">
+<div class="list-heading"><h2 id="report-chat-title">Разбор цифрового следа</h2><button id="report-chat-restart" class="text-button" type="button">Начать заново</button></div>
+<div class="security-content"><p>Подготовим проверку вашей подтверждённой почты, телефона и до трёх username. Результаты и PDF появятся здесь и в истории проверок.</p>
+<div id="report-chat-log" class="profile-chat-log" role="log" aria-label="Диалог проверки данных" tabindex="0"></div>
+<div id="report-chat-options" class="security-actions"></div>
+<form id="report-chat-form">
+<div class="field"><label id="report-chat-label" for="report-chat-input">Ваш ответ</label><input id="report-chat-input" maxlength="200" autocomplete="off" autocapitalize="none" spellcheck="false" required></div>
+<p id="report-chat-error" class="message error" role="status" hidden></p>
+<button id="report-chat-send" class="button primary" type="submit">Отправить</button>
+</form></div>
+</section>
 <div id="jobs-card" class="jobs-card"><div class="list-heading"><h2>История проверок</h2><button id="refresh" class="text-button">Обновить ↻</button></div><p id="dashboard-message" class="message" role="status" aria-live="polite" hidden></p><div id="jobs-list" aria-live="polite"></div><div id="empty" class="empty" hidden><div class="empty-icon" aria-hidden="true">◎</div><h3>Здесь начнётся ваша история</h3><p>Запустите первую проверку, чтобы узнать больше о своём цифровом следе.</p><button id="empty-check" class="button secondary">Начать проверку →</button><p class="small">Заявки, отправленные до подключения кабинета, здесь не отображаются.</p></div><button id="load-more" class="button secondary load-more" hidden>Показать ещё</button></div>
 <section id="profile-search" class="jobs-card profile-chat" aria-labelledby="profile-search-title" hidden>
-<div class="list-heading"><h2 id="profile-search-title">Чат поиска профилей</h2><span id="profile-search-access" class="badge"></span></div>
+<div class="list-heading"><h2 id="profile-search-title">Быстрый поиск профилей по username</h2><span id="profile-search-access" class="badge"></span></div>
 <div id="profile-search-log" class="profile-chat-log" role="log" aria-label="Сообщения поиска" tabindex="0"></div>
 <form id="profile-search-form" class="profile-chat-form" hidden>
 <label class="consent"><input id="profile-search-consent" type="checkbox" required><span>Проверяю свой username и согласен на его передачу в подключённые источники поиска публичных профилей.</span></label>
