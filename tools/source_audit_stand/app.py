@@ -260,7 +260,11 @@ def serve(origin, listener, cert_path, key_path, verify):
     context = ssl.create_default_context(cafile=cert_path)
 
     def routed_async_client(**kwargs):
-        return async_client(transport=SourceTransport(amazon=getattr(trace_context, 'amazon_active', False)), **kwargs)
+        amazon = getattr(trace_context, 'amazon_active', False)
+        html_dir = None
+        if amazon and os.getenv('STAND_CAPTURE_AMAZON_HTML', '1') == '1':
+            html_dir = STAND / 'amazon-html' / trace_context.job_id
+        return async_client(transport=SourceTransport(amazon=amazon, amazon_html_dir=html_dir), **kwargs)
 
     with httpx.Client(trust_env=False) as live, httpx.Client(transport=transport) as mail:
         def lookup_http(url, **kwargs):

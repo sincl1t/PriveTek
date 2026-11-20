@@ -5,6 +5,8 @@ import time
 import httpx
 
 import audit_log
+from amazon_html import save_html
+from helpers import trace
 
 PROFILE_SOURCES = {'GitHub', 'GitLab'}
 
@@ -32,10 +34,12 @@ def skipped(source):
 
 
 class SourceTransport(httpx.AsyncBaseTransport):
-    def __init__(self, live_transport=None, *, amazon=False):
+    def __init__(self, live_transport=None, *, amazon=False, amazon_html_dir=None):
         self.live = live_transport if live_transport is not None else httpx.AsyncHTTPTransport()
         self.mode = 'live' if live_transport is None else 'simulated'
         self.amazon = amazon
+        self.amazon_html_dir = amazon_html_dir
+        self.amazon_response_count = 0
 
     async def handle_async_request(self, request):
         url = request.url
@@ -61,6 +65,15 @@ class SourceTransport(httpx.AsyncBaseTransport):
             audit_log.failure(source, query, error)
             raise
         audit_log.response(source, query, response, round((time.monotonic() - started) * 1000))
+        if self.amazon and self.amazon_html_dir is not None:
+            self.amazon_response_count += 1
+            try:
+                filename = save_html(self.amazon_html_dir, self.amazon_response_count, request.method, response)
+            except (OSError, ValueError) as error:
+                trace('Не удалось сохранить HTML Amazon', error_type=type(error).__name__)
+            else:
+                if filename is not None:
+                    trace('Сохранён HTML Amazon', file=filename)
         return response
 
     async def aclose(self):

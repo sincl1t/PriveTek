@@ -1,6 +1,9 @@
 """Verify the stand's Amazon route without submitting a contact to Amazon."""
+import asyncio
 from contextlib import redirect_stdout
 from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 import httpx
@@ -11,6 +14,42 @@ from source_checks import amazon_phone
 
 
 class AmazonRoutingTests(unittest.TestCase):
+    def test_capture_saves_only_html_and_preserves_password_form_shape(self):
+        html = """
+        <form action="/ax/claim?token=synthetic-secret" method="post">
+          <input name="email" value="+1 (202) 555-0123">
+          <input type="hidden" name="token" value="synthetic-secret">
+          <template>
+            <div style="display: none; background: url(https://example.com)">
+              <input type="password" name="password" value="synthetic-secret">
+            </div>
+          </template>
+          <p>Control +1 (202) 555-0123</p>
+        </form>
+        <script>synthetic-secret</script><img src="https://example.com">
+        """
+
+        def respond(request):
+            if request.method == 'POST':
+                return httpx.Response(302, json={}, headers={'Location': '/ax/claim'})
+            return httpx.Response(200, text=html, headers={'Content-Type': 'text/html; charset=utf-8'})
+
+        async def run(directory):
+            transport = SourceTransport(httpx.MockTransport(respond), amazon=True, amazon_html_dir=directory)
+            async with httpx.AsyncClient(transport=transport) as client:
+                await client.get('https://www.amazon.com/ap/signin')
+                await client.post('https://www.amazon.com/ax/claim', follow_redirects=True)
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            asyncio.run(run(root))
+            self.assertEqual(sorted(path.name for path in root.iterdir()), ['01-GET-200.html', '03-GET-200.html'])
+            snapshot = (root / '03-GET-200.html').read_text(encoding='utf-8')
+        for marker in ('<template>', 'display: none', 'name="password"', 'action="/ax/claim"', "form-action 'none'"):
+            self.assertIn(marker, snapshot)
+        for secret in ('synthetic-secret', '555-0123', 'https://example.com', '<script', 'value='):
+            self.assertNotIn(secret, snapshot)
+
     def test_adapter_submits_each_entered_number_and_logs_no_payload(self):
         requests = []
 
