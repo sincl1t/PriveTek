@@ -212,6 +212,34 @@ def me(request: Request):
     return result(payload)
 
 
+@router.get('/api/account/profile')
+def profile_get(request: Request):
+    import account_profile
+    ready()
+    user, _ = identify(request)
+    try:
+        return result(dict(email=user['email'], email_verified=True, **account_profile.read(user['id'])))
+    except Exception:
+        raise HTTPException(503, 'Не удалось загрузить профиль. Попробуйте позже') from None
+
+
+@router.put('/api/account/profile')
+async def profile_put(request: Request):
+    import account_profile
+    ready()
+    origin(request)
+    user, _ = identify(request, mutation=True)
+    data = await body(request)
+    try:
+        profile = account_profile.normalize(data)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    try:
+        return result(await run_in_threadpool(account_profile.save, user['id'], profile))
+    except Exception:
+        raise HTTPException(503, 'Не удалось сохранить профиль. Попробуйте позже') from None
+
+
 @router.get('/api/account/security')
 def security_status(request: Request):
     import account_mfa
@@ -311,7 +339,7 @@ def page():
 
 @router.get('/account/assets/{name}', include_in_schema=False)
 def asset(name: str):
-    allowed = {'account-nav.js':'application/javascript', 'report-chat.js':'application/javascript', 'start.js':'application/javascript', 'landing-handoff.js':'application/javascript', 'account.css': 'text/css', 'account.js': 'application/javascript',
+    allowed = {'account-profile.js':'application/javascript', 'account-nav.js':'application/javascript', 'report-chat.js':'application/javascript', 'start.js':'application/javascript', 'landing-handoff.js':'application/javascript', 'account.css': 'text/css', 'account.js': 'application/javascript',
                'brand-logo.png': 'image/png', 'brand-background.jpg': 'image/jpeg',
                'tildasans.woff2': 'font/woff2'}
     if name not in allowed:

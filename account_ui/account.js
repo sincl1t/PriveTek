@@ -208,7 +208,7 @@ async function openDashboard() {
   const ticket=++generation; let user;
   try { user = await api('me'); } catch(error) { if(ticket!==generation)return; throw error; }
   if(ticket!==generation)return; loading=false; csrf=user.csrf_token; userEmail=user.email;
-  $('account-email').textContent=userEmail; $('check-email').value=userEmail; $('auth-view').hidden=true; $('dashboard').hidden=false; document.body.classList.add('account-ready'); $('logout').hidden=false; offset=0; await Promise.all([loadJobs(true), loadSecurity(), loadMonitor(), loadProfileSearch(user.profile_search_enabled)]); updateDraftNotice();
+  $('account-email').textContent=userEmail; $('check-email').value=userEmail; $('auth-view').hidden=true; $('dashboard').hidden=false; document.body.classList.add('account-ready'); document.dispatchEvent(new CustomEvent('account-ready', {detail:{email:userEmail}})); $('logout').hidden=false; offset=0; await Promise.all([loadJobs(true), loadSecurity(), loadMonitor(), loadProfileSearch(user.profile_search_enabled)]); updateDraftNotice();
   if(pendingDraft && userEmail.toLowerCase()===pendingDraft.email.toLowerCase() && !draftOffered) {draftOffered=true; openDraftCheck();}
 }
 function textEl(tag, cls, text) { const el=document.createElement(tag); el.className=cls; el.textContent=text; return el; }
@@ -335,7 +335,7 @@ async function loadJobs(reset=false) {
   }catch(error){if(ticket===generation)handleDashboardError(error);}finally{if(ticket===generation){loading=false; $('refresh').disabled=false; $('load-more').disabled=false;}}
 }
 $('refresh').onclick=()=>loadJobs(true); $('load-more').onclick=()=>loadJobs(false);
-$('logout').onclick=async()=>{ $('logout').disabled=true; try{await api('auth/logout',{method:'POST',body:'{}'}); signedOut('Вы вышли из кабинета.');}catch(error){handleDashboardError(error);}finally{$('logout').disabled=false;} };
+$('logout').onclick=async()=>{ document.dispatchEvent(new Event('profile-menu-close')); $('logout').disabled=true; try{await api('auth/logout',{method:'POST',body:'{}'}); signedOut('Вы вышли из кабинета.');}catch(error){handleDashboardError(error);}finally{$('logout').disabled=false;} };
 function openCheck(){openAccountTab('reports');draftInForm=null; trackEvent('report_form_open'); message('check-message',''); openDialog('check-dialog'); $('check-dialog').scrollTop=0;}
 $('new-check').onclick=openCheck; $('empty-check').onclick=openCheck; $('close-check').onclick=()=>closeDialog('check-dialog');
 $('check-form').onsubmit=async event=>{
