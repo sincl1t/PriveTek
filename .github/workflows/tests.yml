@@ -30,4 +30,5 @@ jobs:
           cache: pip
       - run: pip install -r requirements-dev.txt
       - run: python -m pip check
+      - run: python -W error::DeprecationWarning -c "from starlette.testclient import TestClient"
       - run: python -m pytest -q
