@@ -5,8 +5,8 @@ from pathlib import Path
 from uuid import uuid4
 from fpdf import FPDF
 from fpdf.enums import MethodReturnValue
-from report_insights import insights
-from report_data import prepare, SOURCE_URLS, display_time
+from report_insights import breach_count_lines, insights
+from report_data import prepare, SOURCE_URLS, display_time, leakcheck_breach_summary
 
 BASE_DIR = Path(__file__).resolve().parent
 NAVY = (27, 26, 82)
@@ -15,6 +15,43 @@ INK = (40, 48, 66)
 MUTED = (105, 116, 135)
 PALE = (245, 248, 252)
 LOGO_PATH = BASE_DIR / 'assets' / 'privetek-logo.png'
+LEAKCHECK_CLASS_LABELS = {
+    'address': 'Адрес',
+    'city': 'Город',
+    'company_name': 'Название компании',
+    'country': 'Страна',
+    'dob': 'Дата рождения',
+    'email': 'Адрес электронной почты',
+    'first_name': 'Имя',
+    'full_name': 'Полное имя',
+    'gender': 'Пол',
+    'id': 'Идентификатор',
+    'ip': 'IP-адрес',
+    'ip1': 'IP-адрес',
+    'ip2': 'IP-адрес',
+    'last_name': 'Фамилия',
+    'middle_name': 'Дополнительное имя',
+    'name': 'Имя',
+    'origin': 'Сайт, на котором использовались учётные данные',
+    'password': 'Пароль',
+    'phone': 'Номер телефона',
+    'profile_name': 'Имя профиля',
+    'qqmail': 'Адрес электронной почты QQ Mail',
+    'region': 'Регион',
+    'ssn': 'Номер социального страхования США',
+    'state': 'Штат или область',
+    'street': 'Улица',
+    'title': 'Должность',
+    'username': 'Имя пользователя',
+    'zip': 'Почтовый индекс',
+}
+BREACH_CLASS_LABELS = {
+    'Passwords': 'пароли', 'Email addresses': 'email', 'Phone numbers': 'телефоны',
+    'Names': 'имена', 'Usernames': 'имена пользователей', 'IP addresses': 'IP-адреса',
+    'Dates of birth': 'даты рождения', 'password': 'пароли', 'email': 'email',
+    'username': 'имена пользователей', 'phone': 'телефоны', 'first_name': 'имена',
+    'last_name': 'фамилии', 'address': 'адреса', 'ip': 'IP-адреса',
+}
 
 
 class BrandedPDF(FPDF):
@@ -73,6 +110,15 @@ def create_report(data, output_dir=None):
         pdf.multi_cell(0, 6 if size < 14 else 9, text=str(text), align='L',
                        new_x='LMARGIN', new_y='NEXT', link=link)
 
+    def breach_row(breach, show_source=True):
+        if pdf.will_page_break(35):
+            pdf.add_page()
+        paragraph(f"- {breach.get('name', '?')}")
+        details = f"Дата утечки: {breach.get('date', 'дата неизвестна')}"
+        if show_source:
+            details += f". Источник сведений: {breach.get('source', 'HIBP')}."
+        paragraph(details, 9)
+
     def section_title(title):
         paragraph(title, 14)
         pdf.ln(2)
@@ -127,10 +173,8 @@ def create_report(data, output_dir=None):
         ]
         if counts['found'] or counts['possible']:
             found_kinds = Counter(check['kind'] for check in checks if check['status'] == 'found')
-            findings.append(
-                f"Записи об утечках: {len(data.get('email_breach') or [])}. "
-                f"Профили: {found_kinds['username']}. Аватары: {found_kinds['avatar']}."
-            )
+            findings.extend(breach_count_lines(data))
+            findings.append(f"Профили: {found_kinds['username']}. Аватары: {found_kinds['avatar']}.")
         elif counts['not_found']:
             findings.append('В источниках с определённым ответом совпадений не найдено.')
         else:
@@ -240,15 +284,28 @@ def create_report(data, output_dir=None):
             if not entries:
                 paragraph('Нет сведений о выполнении проверки.')
             if key == 'email_breach':
-                for breach in data.get(key) or []:
-                    if pdf.will_page_break(35):
-                        pdf.add_page()
-                    paragraph(f"- {breach.get('name', '?')}")
-                    paragraph('Дата утечки: ' + breach.get('date', 'дата неизвестна') + '. Источник сведений: ' + breach.get('source', 'HIBP') + '.', 9)
+                breaches = data.get(key) or []
+                for breach in (row for row in breaches if row.get('source') != 'LeakCheck'):
+                    breach_row(breach)
                     classes = breach.get('data_classes', [])
                     if classes:
-                        translations = {'Passwords': 'пароли', 'Email addresses': 'email', 'Phone numbers': 'телефоны', 'Names': 'имена', 'Usernames': 'имена пользователей', 'IP addresses': 'IP-адреса', 'Dates of birth': 'даты рождения', 'password': 'пароли', 'email': 'email', 'username': 'имена пользователей', 'phone': 'телефоны', 'first_name': 'имена', 'last_name': 'фамилии', 'address': 'адреса', 'ip': 'IP-адреса'}
-                        paragraph(('Категории во всех совпавших утечках: ' if breach.get('classes_scope') else 'Данные в утечке: ') + ', '.join(translations.get(c, c) for c in classes), 10)
+                        paragraph('Данные в утечке: ' + ', '.join(BREACH_CLASS_LABELS.get(c, c) for c in classes), 10)
+                leakcheck = leakcheck_breach_summary(data)
+                if leakcheck is not None:
+                    fields = leakcheck['data_classes']
+                    labels = dict.fromkeys(LEAKCHECK_CLASS_LABELS[field] for field in fields
+                                           if field in LEAKCHECK_CLASS_LABELS)
+                    if any(field not in LEAKCHECK_CLASS_LABELS for field in fields):
+                        labels['Другая категория'] = None
+                    category_line = 'Категории данных по всем совпадениям: ' + ' • '.join(labels) if labels else ''
+                    category_height = height(category_line, pdf.epw, 10, 6) if category_line else 0
+                    if pdf.will_page_break(6 + category_height + 35):
+                        pdf.add_page()
+                    paragraph('Источники утечек LeakCheck', 12, NAVY)
+                    if category_line:
+                        paragraph(category_line, 10)
+                    for breach in (row for row in breaches if row.get('source') == 'LeakCheck'):
+                        breach_row(breach, show_source=False)
             pdf.ln(4)
             continue
         items = data.get(key)
