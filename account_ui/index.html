@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="ru">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Личный кабинет — PriveTek</title><link rel="stylesheet" href="/account/assets/account.css"><script src="/account/assets/account-nav.js" defer></script><script src="/account/assets/account.js" defer></script><script src="/account/assets/report-chat.js" defer></script></head>
-<body>
+<body class="account-shell">
 <header class="header"><a href="https://privetek.ru/" class="brand" aria-label="PriveTek — на главную страницу"><img class="brand-logo" src="/account/assets/brand-logo.png" alt="PriveTek — сервис контроля цифрового следа" width="235" height="62"><span class="brand-caption">Личный кабинет</span></a><div class="header-right"><span class="secure"><span aria-hidden="true">◇</span> Защищённый кабинет</span><button id="logout" class="text-button" hidden>Выйти</button></div></header>
-<main><aside id="draft-banner" class="draft-banner" hidden><h2>Ваша заявка сохранена</h2><p id="draft-notice"></p><div class="draft-actions"><button id="continue-draft" class="button secondary" type="button" hidden>Продолжить заявку</button><a href="/account/start">Изменить данные</a><button id="discard-draft" class="text-button" type="button">Отменить заявку</button></div></aside>
+<a class="skip-link" href="#main-content">К содержимому</a><main id="main-content" tabindex="-1"><aside id="draft-banner" class="draft-banner" hidden><h2>Ваша заявка сохранена</h2><p id="draft-notice"></p><div class="draft-actions"><button id="continue-draft" class="button secondary" type="button" hidden>Продолжить заявку</button><a href="/account/start">Изменить данные</a><button id="discard-draft" class="text-button" type="button">Отменить заявку</button></div></aside>
 <section id="auth-view" class="auth-layout">
 <div class="intro"><div class="eyebrow"><span class="dot"></span> ВАША ПРИВАТНОСТЬ ПОД КОНТРОЛЕМ</div><h1>Ваш цифровой след.<br><span>В одном месте.</span></h1><p class="lead">Следите за своими проверками, изучайте результаты и возвращайтесь к отчётам, когда это нужно.</p><div class="intro-rule"></div><div class="feature"><span class="feature-icon">01</span><div><h3>История без потерь</h3><p>Новые проверки и их статусы — в вашем кабинете.</p></div></div><div class="feature"><span class="feature-icon">02</span><div><h3>Отчёты под рукой</h3><p>Скачивайте PDF в течение 30 дней после проверки.</p></div></div><div class="feature"><span class="feature-icon">03</span><div><h3>Доступ только для вас</h3><p>Подтверждённая почта и защищённая сессия.</p></div></div><div class="intro-foot">Меньше неизвестности. Больше контроля.</div></div>
 <div class="auth-card"><div class="card-symbol" aria-hidden="true">↗</div><nav id="auth-tabs" class="tabs" aria-label="Вход или создание аккаунта"><a id="login-tab" href="/account/login" class="active" aria-current="page">Войти</a><a id="register-tab" href="/account/register">Создать аккаунт</a></nav>
@@ -11,23 +11,24 @@
 <form id="auth-form"><div id="email-field" class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" placeholder="you@example.com" maxlength="254" required></div><div id="password-field" class="field"><label for="password">Пароль</label><div class="password-wrap"><input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required><button type="button" id="show-password" aria-label="Показать пароль">Показать</button></div><p id="password-hint" class="field-hint" hidden>От 15 до 128 символов. Можно использовать пробелы.</p></div><div id="code-field" class="field" hidden><label for="code">Код из письма</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{8}" minlength="8" maxlength="8" placeholder="00000000"><p class="field-hint">8 цифр · действует 10 минут</p></div><div id="login-mfa-field" class="field" hidden><label for="login-mfa-code">Код входа или резервный код</label><input id="login-mfa-code" autocomplete="one-time-code" maxlength="64" aria-describedby="login-mfa-hint"><p id="login-mfa-hint" class="field-hint"></p></div><p id="auth-message" class="message" role="status" aria-live="polite" hidden></p><button id="auth-submit" class="button primary" type="submit">Войти в кабинет <span aria-hidden="true">→</span></button></form>
 <button id="forgot" class="text-button forgot">Не помню пароль</button><button id="back-login" class="text-button forgot" hidden>Вернуться ко входу</button><p id="auth-note" class="auth-note">При регистрации нужно подтвердить email кодом из письма.</p><div class="card-footer"><span aria-hidden="true">◈</span> Доступ к вашим отчётам защищён</div></div>
 </section>
-<section id="dashboard" hidden><div class="dashboard-heading"><div><div class="eyebrow"><span class="dot"></span> ЛИЧНЫЙ КАБИНЕТ</div><h1>Ваш кабинет</h1><p class="muted" id="account-email"></p></div><button id="new-check" class="button primary">Новая проверка <span aria-hidden="true">+</span></button></div>
-<div class="account-tabs" role="tablist" aria-label="Разделы личного кабинета">
-<button id="account-tab-chat" role="tab" type="button" aria-controls="account-panel-chat" aria-selected="true" tabindex="0" data-account-tab="chat">Чат</button>
-<button id="account-tab-reports" role="tab" type="button" aria-controls="account-panel-reports" aria-selected="false" tabindex="-1" data-account-tab="reports">Отчёты</button>
-<button id="account-tab-links" role="tab" type="button" aria-controls="account-panel-links" aria-selected="false" tabindex="-1" data-account-tab="links">Ссылки</button>
-<button id="account-tab-companies" role="tab" type="button" aria-controls="account-panel-companies" aria-selected="false" tabindex="-1" data-account-tab="companies">Компании</button>
-<button id="account-tab-monitor" role="tab" type="button" aria-controls="account-panel-monitor" aria-selected="false" tabindex="-1" data-account-tab="monitor">Мониторинг</button>
-<button id="account-tab-security" role="tab" type="button" aria-controls="account-panel-security" aria-selected="false" tabindex="-1" data-account-tab="security">Защита входа</button>
+<section id="dashboard" hidden><div class="dashboard-heading"><div><div class="eyebrow"><span class="dot"></span> ЛИЧНЫЙ КАБИНЕТ</div><h1>Ваш цифровой след.<span>Под вашим контролем.</span></h1><p class="dashboard-subtitle">Проверяйте данные, разбирайтесь в находках и выбирайте следующий шаг.</p><p class="muted" id="account-email"></p></div><button id="new-check" class="button primary">Новая проверка <span aria-hidden="true">+</span></button></div>
+<div class="account-tabs" role="tablist" aria-orientation="vertical" aria-label="Разделы личного кабинета">
+<button id="account-tab-chat" role="tab" type="button" aria-controls="account-panel-chat" aria-selected="true" tabindex="0" data-account-tab="chat"><span class="nav-icon" aria-hidden="true">01</span><span class="nav-copy"><span class="nav-title">Разбор цифрового следа</span><span class="nav-description">Поиск и объяснение результатов</span></span><span class="nav-arrow" aria-hidden="true">›</span></button>
+<button id="account-tab-reports" role="tab" type="button" aria-controls="account-panel-reports" aria-selected="false" tabindex="-1" data-account-tab="reports"><span class="nav-icon" aria-hidden="true">02</span><span class="nav-copy"><span class="nav-title">Мои отчёты</span><span class="nav-description">История и PDF</span></span><span class="nav-arrow" aria-hidden="true">›</span></button>
+<button id="account-tab-links" role="tab" type="button" aria-controls="account-panel-links" aria-selected="false" tabindex="-1" data-account-tab="links"><span class="nav-icon" aria-hidden="true">03</span><span class="nav-copy"><span class="nav-title">Проверка ссылок</span><span class="nav-description">Признаки риска в адресе</span></span><span class="nav-arrow" aria-hidden="true">›</span></button>
+<button id="account-tab-companies" role="tab" type="button" aria-controls="account-panel-companies" aria-selected="false" tabindex="-1" data-account-tab="companies"><span class="nav-icon" aria-hidden="true">04</span><span class="nav-copy"><span class="nav-title">Проверка компаний</span><span class="nav-description">Статус по ИНН или ОГРН</span></span><span class="nav-arrow" aria-hidden="true">›</span></button>
+<button id="account-tab-monitor" role="tab" type="button" aria-controls="account-panel-monitor" aria-selected="false" tabindex="-1" data-account-tab="monitor"><span class="nav-icon" aria-hidden="true">05</span><span class="nav-copy"><span class="nav-title">Мониторинг</span><span class="nav-description">Новые находки и изменения</span></span><span class="nav-arrow" aria-hidden="true">›</span></button>
+<button id="account-tab-security" role="tab" type="button" aria-controls="account-panel-security" aria-selected="false" tabindex="-1" data-account-tab="security"><span class="nav-icon" aria-hidden="true">06</span><span class="nav-copy"><span class="nav-title">Безопасность</span><span class="nav-description">Защита входа и резервные коды</span></span><span class="nav-arrow" aria-hidden="true">›</span></button>
 </div>
 <div id="account-panel-chat" role="tabpanel" aria-labelledby="account-tab-chat" tabindex="0">
+<div class="section-intro"><span class="section-kicker">НАЧНИТЕ ЗДЕСЬ</span><h2>Проверка в формате диалога</h2><p>Проверим подтверждённую почту, телефон и до трёх username. Отчёт останется в истории, а PDF придёт на почту.</p></div>
 <section class="jobs-card profile-chat" aria-labelledby="report-chat-title">
-<div class="list-heading"><h2 id="report-chat-title">Разбор цифрового следа</h2><button id="report-chat-restart" class="text-button" type="button">Начать заново</button></div>
-<div class="security-content"><p>Подготовим проверку вашей подтверждённой почты, телефона и до трёх username. Результаты и PDF появятся здесь и в истории проверок.</p>
+<div class="list-heading"><h2 id="report-chat-title">Ваш диалог с PriveTek</h2><button id="report-chat-restart" class="text-button" type="button">Начать заново</button></div>
+<div class="security-content">
 <div id="report-chat-log" class="profile-chat-log" role="log" aria-label="Диалог проверки данных" tabindex="0"></div>
 <div id="report-chat-options" class="security-actions"></div>
 <form id="report-chat-form">
-<div class="field"><label id="report-chat-label" for="report-chat-input">Ваш ответ</label><input id="report-chat-input" maxlength="200" autocomplete="off" autocapitalize="none" spellcheck="false" required></div>
+<div class="field"><label id="report-chat-label" for="report-chat-input">Ваш ответ</label><input id="report-chat-input" placeholder="Напишите ответ…" maxlength="200" autocomplete="off" autocapitalize="none" spellcheck="false" required></div>
 <p id="report-chat-error" class="message error" role="status" hidden></p>
 <button id="report-chat-send" class="button primary" type="submit">Отправить</button>
 </form></div>
@@ -47,11 +48,13 @@
 
 </div>
 <div id="account-panel-reports" role="tabpanel" aria-labelledby="account-tab-reports" tabindex="0" hidden>
+<div class="section-intro"><span class="section-kicker">ВАШИ РЕЗУЛЬТАТЫ</span><h2>История без потерь</h2><p>Следите за статусом проверок, изучайте находки и сохраняйте готовые PDF.</p></div>
 <div class="info-strip"><div><span class="strip-icon" aria-hidden="true">◷</span><span>PDF-отчёты доступны <strong>30 дней</strong></span></div><span>Скачайте нужные файлы заранее</span></div>
 <div id="jobs-card" class="jobs-card"><div class="list-heading"><h2>История проверок</h2><button id="refresh" class="text-button">Обновить ↻</button></div><p id="dashboard-message" class="message" role="status" aria-live="polite" hidden></p><div id="jobs-list" aria-live="polite"></div><div id="empty" class="empty" hidden><div class="empty-icon" aria-hidden="true">◎</div><h3>Здесь начнётся ваша история</h3><p>Запустите первую проверку, чтобы узнать больше о своём цифровом следе.</p><button id="empty-check" class="button secondary">Начать проверку →</button><p class="small">Заявки, отправленные до подключения кабинета, здесь не отображаются.</p></div><button id="load-more" class="button secondary load-more" hidden>Показать ещё</button></div>
 
 </div>
 <div id="account-panel-links" role="tabpanel" aria-labelledby="account-tab-links" tabindex="0" hidden>
+<div class="section-intro"><span class="section-kicker">ПЕРЕД ПЕРЕХОДОМ</span><h2>Присмотритесь к ссылке</h2><p>Проверьте адрес на подозрительные признаки, прежде чем открывать его.</p></div>
 <section class="jobs-card security-card" aria-labelledby="link-check-title">
 <div class="list-heading"><h2 id="link-check-title">Проверка ссылок</h2></div>
 <div class="security-content">
@@ -66,6 +69,7 @@
 
 </div>
 <div id="account-panel-companies" role="tabpanel" aria-labelledby="account-tab-companies" tabindex="0" hidden>
+<div class="section-intro"><span class="section-kicker">ДЕЛОВЫЕ КОНТАКТЫ</span><h2>Узнайте статус компании</h2><p>Проверьте регистрационный статус юридического лица по ИНН или ОГРН.</p></div>
 <section class="jobs-card security-card" aria-labelledby="counterparty-title">
 <div class="list-heading"><h2 id="counterparty-title">Проверка контрагента</h2></div>
 <div class="security-content">
@@ -80,10 +84,12 @@
 
 </div>
 <div id="account-panel-monitor" role="tabpanel" aria-labelledby="account-tab-monitor" tabindex="0" hidden>
+<div class="section-intro"><span class="section-kicker">СЛЕДИТЕ ЗА ИЗМЕНЕНИЯМИ</span><h2>Новые находки под контролем</h2><p>Настройки повторных проверок, уведомления и история изменений — в одном разделе.</p></div>
 <section class="jobs-card monitor-card" aria-labelledby="monitor-title"><div class="list-heading"><h2 id="monitor-title">Мониторинг</h2><span id="monitor-status" class="badge">Выключен</span></div><div class="monitor-body"><p>Раз в неделю проверяем ваш email и один username. Первая проверка создаёт исходный снимок. Письмо отправляем только при новых находках; это не дата создания аккаунта или возникновения утечки.</p><p id="monitor-dates" class="small"></p><p id="monitor-message" class="message" role="status" hidden></p><form id="monitor-form"><div class="field"><label for="monitor-username">Username для мониторинга · необязательно</label><input id="monitor-username" maxlength="65" autocomplete="off"></div><label class="consent"><input id="monitor-use-reviews" type="checkbox" checked><span>Учитывать отметки «Не моё» для точных публичных профилей из моих проверок в ЛК. Отметки по утечкам не исключают целиком провайдера.</span></label><label class="consent"><input id="monitor-consent" type="checkbox"><span>Разрешаю еженедельную проверку своего email и указанного username в подключённых источниках и письма о новых находках. Зашифрованная история хранится 90 дней. Мониторинг можно отключить.</span></label><div class="monitor-actions"><button id="monitor-enable" class="button primary" type="submit">Включить мониторинг</button><button id="monitor-pause" class="button secondary" type="button" hidden>Пауза</button><button id="monitor-resume" class="button secondary" type="button" hidden>Продолжить</button><button id="monitor-delete" class="text-button" type="button" hidden>Выключить и удалить данные</button><button id="monitor-refresh" class="text-button" type="button">Обновить историю</button></div></form><p class="small">Пилот: до 10 участников, четыре недели. Телефон и OpenAI не используются. Полнота и доступность источников не гарантируются. Уже начатую отправку письма отменить нельзя.</p><div id="monitor-exclusions"></div><div id="monitor-history"></div><button id="monitor-load-more" class="button secondary" type="button" hidden>Ещё проверки</button></div></section>
 
 </div>
 <div id="account-panel-security" role="tabpanel" aria-labelledby="account-tab-security" tabindex="0" hidden>
+<div class="section-intro"><span class="section-kicker">ВАШ АККАУНТ</span><h2>Дополнительный уровень защиты</h2><p>Выберите второй фактор и сохраните резервные коды для восстановления доступа.</p></div>
 <section class="jobs-card security-card" aria-labelledby="security-title">
 <div class="list-heading"><h2 id="security-title">Защита входа</h2><span id="mfa-status" class="badge pending">Загрузка…</span></div>
 <div class="security-content"><p>После пароля потребуется код из письма или приложения-аутентификатора. Сохраните резервные коды на случай потери доступа к выбранному способу.</p>
@@ -98,7 +104,7 @@
 
 </div>
 
-<p class="dashboard-note">Совпадение username не подтверждает принадлежность аккаунта. Ограничения источников указаны в отчёте.</p>
+<p class="dashboard-note"><span aria-hidden="true">ⓘ</span> Совпадение username не подтверждает принадлежность аккаунта. Ограничения источников указаны в отчёте.</p>
 </section>
 </main>
 <footer class="footer"><span>© PriveTek</span><span>Ваши данные заслуживают внимания.</span></footer>
