@@ -1,5 +1,6 @@
 """Source audit stand: real product UI with live LeakCheck, GitHub and GitLab."""
 import argparse
+from functools import partial
 from hashlib import sha256
 from io import BytesIO
 import logging
@@ -39,6 +40,7 @@ HASHES = {
 }
 LEAKCHECK_API = "https://leakcheck.io/api/public"
 DEMO_PASSWORD = "PriveTek-Audit-2026!"
+VERIFY_PHONE = "+12025550123"
 
 
 def register(client, email, password):
@@ -53,7 +55,8 @@ def verify_scenario(client, password, scenario, email, usernames, expected_leakc
     client.cookies.clear()
     expect(client.post('/api/account/auth/login', json={'email': email, 'password': password}), 200)
     csrf = {'X-CSRF-Token': expect(client.get('/api/account/me'), 200).json()['csrf_token']}
-    payload = dict(consent=True, username=usernames[0], additional_usernames=usernames[1:])
+    payload = dict(consent=True, phone=VERIFY_PHONE, username=usernames[0],
+                   additional_usernames=usernames[1:])
     job_id = expect(client.post('/api/account/jobs', json=payload, headers=csrf), 202).json()['job_id']
     for _ in range(240):
         jobs = expect(client.get('/api/account/jobs'), 200).json()['items']
@@ -77,6 +80,10 @@ def verify_scenario(client, password, scenario, email, usernames, expected_leakc
     local, domain = email.split('@')
     checks = {
         'account_email_matches': email_node['title'] == local[0] + '***@' + domain,
+        'amazon_phone_skipped': any(
+            row['source'] == 'Amazon' and row['kind'] == 'phone' and row['status'] == 'skipped'
+            for row in snapshot['coverage']['entries']
+        ),
         'leakcheck_status': leakcheck['status'] == expected_leakcheck,
         'leakcheck_pdf_label': f"LeakCheck: {audit_log.LABELS.get(leakcheck['status'])}" in text,
         'profile_checks_count': len(profiles) == 2 * len(usernames),
@@ -165,6 +172,22 @@ def format_verification_summary(rows, scenarios):
     return '\n'.join(output)
 
 
+def audit_search(original_search, email=None, phone=None, username=None, additional_usernames=None, *, verify):
+    usernames = [value for value in [username, *(additional_usernames or [])] if value]
+    search_phone = None if verify else phone
+    audit_log.begin(email, usernames, phone_supplied=bool(search_phone))
+    if verify and phone:
+        trace('Проверка телефона пропущена в режиме --verify')
+    trace('Вход в поиск', email=email, usernames=audit_log.compact(usernames), phone=bool(search_phone))
+    try:
+        result = original_search(email, search_phone, username, additional_usernames)
+    except Exception as error:
+        trace('Ошибка поиска', error_type=type(error).__name__)
+        raise
+    audit_log.processed(result)
+    return result
+
+
 def serve(origin, listener, cert_path, key_path, verify):
     import server
     import osint
@@ -198,18 +221,6 @@ def serve(origin, listener, cert_path, key_path, verify):
         if duplicate:
             trace('Повторная заявка: используется существующее задание, новый поиск не запускается')
         return job_id, duplicate
-
-    def search(email=None, phone=None, username=None, additional_usernames=None):
-        usernames = [value for value in [username, *(additional_usernames or [])] if value]
-        audit_log.begin(email, usernames, phone_supplied=bool(phone))
-        trace('Вход в поиск', email=email, usernames=audit_log.compact(usernames), phone=bool(phone))
-        try:
-            result = original_search(email, phone, username, additional_usernames)
-        except Exception as error:
-            trace('Ошибка поиска', error_type=type(error).__name__)
-            raise
-        audit_log.processed(result)
-        return result
 
     async def profile_check(source, username, client):
         if source[0] not in PROFILE_SOURCES:
@@ -289,7 +300,7 @@ def serve(origin, listener, cert_path, key_path, verify):
             return mail.post(url, **kwargs)
 
         with patch.object(osint, "run_checks", stand_checks), \
-                patch.object(osint, "search", search), \
+                patch.object(osint, "search", partial(audit_search, original_search, verify=verify)), \
                 patch.object(public_sources, "check_profile", profile_check), \
                 patch.object(osint.discovery, "run", no_discovery), \
                 patch.object(server.guard, "reserve", reserve), \
@@ -322,7 +333,8 @@ def serve(origin, listener, cert_path, key_path, verify):
                     client.cookies.clear()
                     Path('/tmp/source-audit-ready').write_text('ready')
                     print(f'\nСТЕНД АУДИТА ИСТОЧНИКОВ ГОТОВ: {origin}/account/login', flush=True)
-                    print('Живые источники: LeakCheck, GitHub, GitLab, Amazon по телефону.', flush=True)
+                    live_sources = 'LeakCheck, GitHub, GitLab' if verify else 'LeakCheck, GitHub, GitLab, Amazon по телефону'
+                    print(f'Живые источники: {live_sources}.', flush=True)
                     print('Регистрация не нужна: два тестовых аккаунта уже подготовлены.', flush=True)
                     if verify:
                         return verify_reports(client, password)

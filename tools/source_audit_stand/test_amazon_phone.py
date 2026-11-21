@@ -5,15 +5,30 @@ from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import trio
 
+from app import VERIFY_PHONE, audit_search
+import osint
 from profiles import SourceTransport
 from source_checks import amazon_phone
 
 
 class AmazonRoutingTests(unittest.TestCase):
+    def test_only_verify_mode_skips_phone_checks(self):
+        run_checks = AsyncMock(return_value=[{'name': 'Amazon', 'exists': True, 'domain': 'amazon.com'}])
+        with patch.object(osint, 'run_checks', run_checks), redirect_stdout(StringIO()):
+            automatic = audit_search(osint.search, phone=VERIFY_PHONE, verify=True)
+            run_checks.assert_not_called()
+            manual = audit_search(osint.search, phone=VERIFY_PHONE, verify=False)
+
+        run_checks.assert_awaited_once_with([('Amazon', osint.ignorant_amazon)], ('2025550123', '1'))
+        for result, expected_status in ((automatic, 'skipped'), (manual, 'possible')):
+            check, = [row for row in result['checks'] if row['source'] == 'Amazon' and row['kind'] == 'phone']
+            self.assertEqual(check['status'], expected_status)
+
     def test_capture_saves_only_html_and_preserves_password_form_shape(self):
         html = """
         <form action="/ax/claim?token=synthetic-secret" method="post">

@@ -117,8 +117,8 @@ def test_leakcheck_result_in_pdf(
     assert leakcheck["status"] == expected_status
 
     pdf_path = create_report(results, tmp_path)
-    extracted_text = " ".join(page.extract_text() or "" for page in PdfReader(pdf_path).pages)
-    pdf_text = " ".join(extracted_text.split())
+    page_texts = [page.extract_text() or "" for page in PdfReader(pdf_path).pages]
+    pdf_text = " ".join(" ".join(page_texts).split())
     breach_section = pdf_text.split("Утечки данных по email", 1)[1].split(
         "Регистрации email на сайтах", 1
     )[0]
@@ -138,7 +138,8 @@ def test_leakcheck_result_in_pdf(
         for name, date in expected_rows:
             assert f"{name} Дата утечки: {date}. Источник сведений: LeakCheck." in breach_section
         assert breach_section.count("Категории во всех совпавших утечках: пароли") == 2
-        assert "Записей об утечках: 2." in pdf_text
+        first_page = " ".join(page_texts[0].split())
+        assert "Записи об утечках: 2." in first_page
     else:
         assert results["email_breach"] == ([] if expected_status == "not_found" else None)
         assert "Источник сведений: LeakCheck." not in breach_section

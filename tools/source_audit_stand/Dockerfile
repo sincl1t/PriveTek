@@ -9,6 +9,6 @@ COPY DejaVuSansCondensed.ttf ./
 COPY assets/ ./assets/
 COPY account_ui/ ./account_ui/
 COPY migrations/ ./migrations/
-COPY tools/source_audit_stand/ ./tools/source_audit_stand/
+COPY tools/ ./tools/
 RUN python -c "import uvicorn, fastapi; assert callable(uvicorn.run); assert callable(fastapi.FastAPI); from pathlib import Path; assert Path('server.py').stat().st_size > 0"
 ENTRYPOINT ["python", "-X", "utf8", "tools/source_audit_stand/app.py"]
