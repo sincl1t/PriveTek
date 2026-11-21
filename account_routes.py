@@ -153,6 +153,19 @@ def action(data, request, name):
         outcome = store.login(email, password, crypto.digest('session', token))
         if not outcome:
             raise HTTPException(401, 'Неверный email или пароль; email должен быть подтверждён')
+        if isinstance(outcome, tuple):
+            import account_mfa
+            challenge, code = outcome
+            try:
+                quota(request, email, 'mfa-email-send', 5)
+                email_sender.send_account_code(email, code, 'mfa')
+            except HTTPException:
+                account_mfa.cancel_login(challenge)
+                raise
+            except Exception:
+                account_mfa.cancel_login(challenge)
+                raise HTTPException(503, 'Не удалось отправить код входа. Попробуйте позже') from None
+            return result(dict(mfa_required=True, method='email', challenge_id=challenge, expires_in=300))
         if isinstance(outcome, str):
             return result(dict(mfa_required=True, challenge_id=outcome, expires_in=300))
         return session_response(request, token)
@@ -160,11 +173,11 @@ def action(data, request, name):
         import account_mfa
         challenge, code = data.get('challenge_id'), data.get('code')
         if not isinstance(challenge, str) or not re.fullmatch(r'[0-9a-f]{48}', challenge) or not isinstance(code, str) or len(code) > 64:
-            raise HTTPException(422, 'Введите код приложения или резервный код')
+            raise HTTPException(422, 'Введите код входа или резервный код')
         quota(request, challenge, 'mfa-login', 10)
         token = secrets.token_urlsafe(32)
         if not account_mfa.finish_login(challenge, code.strip(), crypto.digest('session', token)):
-            raise HTTPException(400, 'Код неверен, уже использован или вход истёк. Для нового кода дождитесь его смены в приложении')
+            raise HTTPException(400, 'Код неверен, уже использован или вход истёк. Проверьте код или начните вход заново')
         return session_response(request, token)
     if name == 'logout':
         _, token = identify(request, mutation=True)
@@ -192,7 +205,11 @@ async def auth(name: str, request: Request):
 def me(request: Request):
     ready()
     user, token = identify(request)
-    return result(dict(email=user['email'], csrf_token=crypto.digest('csrf', token)))
+    import profile_search
+    payload = dict(email=user['email'], csrf_token=crypto.digest('csrf', token))
+    if profile_search.enabled():
+        payload['profile_search_enabled'] = True
+    return result(payload)
 
 
 @router.get('/api/account/security')
@@ -225,12 +242,14 @@ def security_action(data, request, name):
         raise HTTPException(422, 'Введите код подтверждения')
     if name == 'confirm':
         codes = account_mfa.confirm(user['id'], session_hash, code.strip())
+    elif name == 'enable-email':
+        codes = account_mfa.enable_email(user['id'], data.get('password'), code.strip(), session_hash)
     elif name in ('disable', 'recovery'):
         codes = account_mfa.manage(user['id'], data.get('password'), code.strip(), session_hash, disable=name == 'disable')
     else:
         raise HTTPException(404, 'Действие не найдено')
     if codes is None:
-        raise HTTPException(400, 'Проверьте пароль и новый код приложения или неиспользованный резервный код')
+        raise HTTPException(400, 'Проверьте пароль и код, который требуется для текущего способа защиты')
     return result(dict(enabled=name != 'disable', recovery_codes=codes))
 
 
@@ -292,7 +311,7 @@ def page():
 
 @router.get('/account/assets/{name}', include_in_schema=False)
 def asset(name: str):
-    allowed = {'start.js':'application/javascript', 'landing-handoff.js':'application/javascript', 'account.css': 'text/css', 'account.js': 'application/javascript',
+    allowed = {'account-nav.js':'application/javascript', 'report-chat.js':'application/javascript', 'start.js':'application/javascript', 'landing-handoff.js':'application/javascript', 'account.css': 'text/css', 'account.js': 'application/javascript',
                'brand-logo.png': 'image/png', 'brand-background.jpg': 'image/jpeg',
                'tildasans.woff2': 'font/woff2'}
     if name not in allowed:
@@ -313,7 +332,8 @@ def identity_read(job_id: str, request: Request):
     snapshot = store.identity_snapshot(user['email_key'], job_id)
     if snapshot is None:
         raise HTTPException(404, 'Карточка недоступна: старая проверка, истёк срок или отчёт удалён')
-    return result(snapshot)
+    import breach_catalogue
+    return result(breach_catalogue.decorate(snapshot))
 
 
 def identity_update(data, request, job_id):
@@ -385,3 +405,54 @@ async def analytics_event(request: Request):
         raise HTTPException(429, 'Слишком много событий')
     await run_in_threadpool(acquisition.safe, acquisition.client_event, request, kind)
     return result({'accepted': True})
+
+
+@router.get('/api/account/profile-search')
+def profile_search_status(request: Request):
+    import profile_search
+    ready()
+    if not profile_search.enabled():
+        raise HTTPException(404, 'Поиск по username пока недоступен')
+    user, _ = identify(request)
+    return result(profile_search.state(user['id']))
+
+
+@router.post('/api/account/profile-search')
+async def profile_search_submit(request: Request):
+    import profile_search
+    from search_inputs import normalize_username
+    ready()
+    if not profile_search.enabled():
+        raise HTTPException(404, 'Поиск по username пока недоступен')
+    origin(request)
+    data = await body(request)
+    user, _ = await run_in_threadpool(identify, request, True)
+    try:
+        username = normalize_username(data.get('username'))
+        if not username:
+            raise ValueError('Введите username.')
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    if data.get('consent') is not True:
+        raise HTTPException(422, 'Подтвердите согласие на проверку своего username.')
+    await run_in_threadpool(quota, request, user['email'], 'profile-search', 10)
+    return result(await run_in_threadpool(profile_search.submit, user['id'], username))
+
+
+@router.post('/api/account/counterparty')
+async def counterparty_check(request: Request):
+    import counterparty
+
+    ready()
+    origin(request)
+    user, _ = await run_in_threadpool(identify, request, True)
+    data = await body(request)
+    try:
+        field, identifier = counterparty.company_identifier(data.get('identifier'))
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    token = counterparty.provider_token()
+    if not token:
+        raise HTTPException(503, 'Источник данных о компаниях пока не подключён.')
+    await run_in_threadpool(quota, request, user['email'], 'counterparty', 10)
+    return result(await run_in_threadpool(counterparty.assess, field, identifier, token))

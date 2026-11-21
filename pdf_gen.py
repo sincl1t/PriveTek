@@ -1,4 +1,5 @@
 """Create a Cyrillic PDF; paths do not depend on the launch directory."""
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -118,13 +119,43 @@ def create_report(data, output_dir=None):
         paragraph('ДЕМОНСТРАЦИОННЫЙ ОТЧЁТ. Все результаты вымышлены.', 9, MUTED)
     pdf.ln(5)
     if 'checks' in data and not data.get('identity_only'):
-        summary, actions = insights(data)
-        section_title('Краткий итог')
-        panel([(line, 10, NAVY if index == 0 else INK, '', 5.6)
-               for index, line in enumerate(summary)])
+        _, actions = insights(data)
+        checks = data['checks']
+        counts = Counter(check['status'] for check in checks)
+        findings = [
+            f"Проверки с находками: {counts['found']}. Возможные совпадения: {counts['possible']}.",
+        ]
+        if counts['found'] or counts['possible']:
+            found_kinds = Counter(check['kind'] for check in checks if check['status'] == 'found')
+            findings.append(
+                f"Записи об утечках: {len(data.get('email_breach') or [])}. "
+                f"Профили: {found_kinds['username']}. Аватары: {found_kinds['avatar']}."
+            )
+        elif counts['not_found']:
+            findings.append('В источниках с определённым ответом совпадений не найдено.')
+        else:
+            findings.append('Проверок с определённым результатом пока нет.')
+
+        skipped = counts['skipped'] + counts['disabled']
+        uncertain = len(checks) - counts['found'] - counts['not_found'] - counts['unavailable'] - skipped
+        limits = [
+            f"Недоступные: {counts['unavailable']}. Без точного ответа: {uncertain}.",
+            f"Пропущенные или отключённые: {skipped}.",
+        ] if checks else ['Результаты проверок не записаны.']
+
+        details_link = pdf.add_link()
+        for title, body, accent in (
+            ('Что нашли', findings, CYAN),
+            ('Что не удалось проверить', limits, (205, 150, 51)),
+            ('Что делать дальше', actions[:1], CYAN),
+        ):
+            panel([(title, 18, NAVY, '', 9)] +
+                  [(line, 16, INK, '', 7.8) for line in body], accent)
+        paragraph('Подробности и источники →', 16, (0, 100, 125), details_link)
+        pdf.add_page()
+        pdf.set_link(details_link, y=pdf.get_y(), page=pdf.page_no())
         if data.get('duplicates_removed'):
             paragraph(f"Одинаковых записей объединено: {data['duplicates_removed']}. Различающиеся результаты сохранены отдельно.", 9)
-        pdf.ln(4)
     from analysis_layer import analyze, lines as analysis_lines
     analysis = analyze(data)
     from ai_summary import display_ids

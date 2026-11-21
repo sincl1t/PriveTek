@@ -76,7 +76,7 @@ function switchMode(next, notice = '') {
   $('login-mfa-field').hidden = mode !== 'mfa'; $('login-mfa-code').required = mode === 'mfa'; $('login-mfa-code').value = '';
   if (mode !== 'mfa') mfaChallenge = '';
   $('forgot').hidden = mode !== 'login'; $('back-login').hidden = ['login','register'].includes(mode);
-  $('auth-note').textContent = mode === 'mfa' ? 'Потеряли телефон? Используйте один из сохранённых резервных кодов. Сброс пароля не отключает 2FA.' : ['verify','reset'].includes(mode) ? 'Не пришло письмо? Проверьте «Спам». Для нового кода вернитесь и повторите запрос.' : 'При регистрации нужно подтвердить email кодом из письма.';
+  $('auth-note').textContent = mode === 'mfa' ? 'Для входа также подойдёт один из сохранённых резервных кодов.' : ['verify','reset'].includes(mode) ? 'Не пришло письмо? Проверьте «Спам». Для нового кода вернитесь и повторите запрос.' : 'При регистрации нужно подтвердить email кодом из письма.';
 }
 $('login-tab').onclick = event => { event.preventDefault(); if (!authBusy) switchMode('login'); };
 $('register-tab').onclick = event => { event.preventDefault(); if (!authBusy) switchMode('register'); };
@@ -92,22 +92,220 @@ $('auth-form').onsubmit = async event => {
     if (current === 'mfa') { payload.challenge_id = mfaChallenge; payload.code = $('login-mfa-code').value.trim(); delete payload.email; }
     if (['login','register','reset'].includes(current)) payload.password = $('password').value;
     const data = await api('auth/' + path,{method:'POST',body:JSON.stringify(payload)});
-    if (current === 'login' && data.mfa_required) { switchMode('mfa'); mfaChallenge = data.challenge_id; $('login-mfa-code').focus(); }
-    else if (current==='login' || current==='mfa') { $('password').value=''; $('login-mfa-code').value=''; mfaChallenge=''; await openDashboard(); }
+    if (current === 'login' && data.mfa_required) {
+      switchMode('mfa');
+      mfaChallenge = data.challenge_id;
+      $('login-mfa-hint').textContent = data.method === 'email'
+        ? 'Код отправлен на подтверждённый email и действует 5 минут. Проверьте «Спам», если письма нет.'
+        : 'Введите свежий код из приложения-аутентификатора.';
+      if (data.method === 'email') $('auth-caption').textContent = 'Введите код из письма или одноразовый резервный код.';
+      $('login-mfa-code').focus();
+    } else if (current==='login' || current==='mfa') { $('password').value=''; $('login-mfa-code').value=''; mfaChallenge=''; await openDashboard(); }
     else if (current==='register' || current==='forgot') { challenge=data.challenge_id; switchMode(current==='register'?'verify':'reset',data.message); $('code').focus(); }
     else { challenge=''; switchMode('login',data.message); $('password').focus(); }
   } catch (error) { message('auth-message',error.message,true); }
   finally { authBusy=false; $('auth-submit').disabled=false; }
 };
-function signedOut(notice='') { closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode(location.pathname==='/account/register'?'register':'login',notice); updateDraftNotice(); }
+function signedOut(notice='') { clearProfileSearch(); document.dispatchEvent(new Event('account-signed-out')); $('counterparty-form').reset(); $('link-check-form').reset(); $('link-check-result').textContent=''; closeCoverage(); resetExtraUsernames(); trackEvent('form_open'); clearMonitor(); closeIdentity(); clearMfaSecrets(); generation++; loading=false; challenge=''; csrf=''; userEmail=''; $('check-form').reset(); $('check-email').value=''; $('dashboard').hidden=true; $('auth-view').hidden=false; $('logout').hidden=true; $('jobs-list').textContent = ''; closeDialog('check-dialog'); switchMode(location.pathname==='/account/register'?'register':'login',notice); updateDraftNotice(); }
+
+function assessLink(value) {
+  const address = value.trim();
+  const authority = /^https?:\/\/([^/?#]+)/i.exec(address);
+  if (!authority || /[\s\\\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/.test(address)) {
+    return {error: 'Введите полный адрес HTTP или HTTPS без пробелов и скрытых символов.'};
+  }
+  let url;
+  try {
+    url = new URL(address);
+  } catch {
+    return {error: 'Не удалось разобрать адрес. Проверьте скопированную ссылку.'};
+  }
+
+  const signals = [];
+  if (url.protocol === 'http:') signals.push('HTTP не шифрует соединение.');
+  if (authority[1].includes('@')) signals.push('Символ @ в начале адреса может скрывать фактический домен.');
+  if (url.port) signals.push('Адрес использует нестандартный порт.');
+  if (url.hostname.split('.').some(label => label.startsWith('xn--'))) {
+    signals.push('В доменном имени есть международные символы. Сверьте его с официальным адресом сайта.');
+  }
+  if (/^(?:\[|\d+(?:\.\d+){3}$)/.test(url.hostname)) {
+    signals.push('Вместо доменного имени указан IP-адрес.');
+  }
+  return {hostname: url.hostname, signals};
+}
+
+$('link-check-url').addEventListener('input', () => { $('link-check-result').textContent = ''; });
+$('link-check-form').onsubmit = event => {
+  event.preventDefault();
+  if ($('dashboard').hidden) return;
+  const result = $('link-check-result');
+  const {error, hostname, signals} = assessLink($('link-check-url').value);
+  result.textContent = '';
+  if (error) {
+    result.append(textEl('p', 'message error', error));
+    return;
+  }
+  result.append(textEl('p', 'link-check-host', 'Хост: ' + hostname));
+  if (!signals.length) {
+    result.append(textEl('p', '', 'В адресе не обнаружены проверяемые признаки риска. Безопасность сайта не подтверждена.'));
+    return;
+  }
+  const list = textEl('ul', '', '');
+  for (const signal of signals) list.append(textEl('li', '', signal));
+  result.append(textEl('p', '', 'Перед переходом проверьте адрес сайта:'), list);
+};
+let counterpartyRequest = null;
+$('counterparty-form').addEventListener('reset', () => {
+  counterpartyRequest = null;
+  $('counterparty-result').textContent = '';
+  $('counterparty-submit').disabled = false;
+});
+$('counterparty-identifier').addEventListener('input', () => {
+  $('counterparty-result').textContent = '';
+});
+$('counterparty-form').onsubmit = async event => {
+  event.preventDefault();
+  if ($('dashboard').hidden || counterpartyRequest) return;
+  const button = $('counterparty-submit');
+  const input = $('counterparty-identifier');
+  const result = $('counterparty-result');
+  const identifier = input.value;
+  const request = {};
+  counterpartyRequest = request;
+  button.disabled = true;
+  result.textContent = 'Проверяем сведения о компании…';
+  try {
+    const data = await api('counterparty', {
+      method: 'POST', body: JSON.stringify({identifier})
+    });
+    if (counterpartyRequest !== request || input.value !== identifier) return;
+    result.textContent = '';
+    result.append(textEl('h3', '', data.status));
+    const source = textEl('a', '', data.source);
+    source.href = 'https://dadata.ru/api/find-party/';
+    const check = textEl('p', 'small', '');
+    check.append(source, ' · Проверено ' + new Date(data.checked_at).toLocaleString('ru-RU'));
+    const signals = textEl('ul', '', '');
+    for (const signal of data.signals) signals.append(textEl('li', '', signal));
+    if (data.signals.length) result.append(signals);
+    else result.append(textEl('p', '', data.outcome === 'found'
+      ? 'По регистрационному статусу признаки риска не выявлены.'
+      : 'Недостаточно данных для оценки.'));
+    result.append(check);
+  } catch (error) {
+    if (counterpartyRequest !== request) return;
+    if (error.status === 401) signedOut('Сессия завершилась. Войдите снова.');
+    else if (input.value === identifier) result.textContent = error.message;
+  } finally {
+    if (counterpartyRequest === request) {
+      counterpartyRequest = null;
+      button.disabled = false;
+    }
+  }
+};
+
 async function openDashboard() {
   const ticket=++generation; let user;
   try { user = await api('me'); } catch(error) { if(ticket!==generation)return; throw error; }
   if(ticket!==generation)return; loading=false; csrf=user.csrf_token; userEmail=user.email;
-  $('account-email').textContent=userEmail; $('check-email').value=userEmail; $('auth-view').hidden=true; $('dashboard').hidden=false; $('logout').hidden=false; offset=0; await Promise.all([loadJobs(true), loadSecurity(), loadMonitor()]); updateDraftNotice();
+  $('account-email').textContent=userEmail; $('check-email').value=userEmail; $('auth-view').hidden=true; $('dashboard').hidden=false; $('logout').hidden=false; offset=0; await Promise.all([loadJobs(true), loadSecurity(), loadMonitor(), loadProfileSearch(user.profile_search_enabled)]); updateDraftNotice();
   if(pendingDraft && userEmail.toLowerCase()===pendingDraft.email.toLowerCase() && !draftOffered) {draftOffered=true; openDraftCheck();}
 }
 function textEl(tag, cls, text) { const el=document.createElement(tag); el.className=cls; el.textContent=text; return el; }
+function clearProfileSearch() {
+  $('profile-search').hidden = true;
+  $('profile-search-form').hidden = true;
+  $('profile-search-form').reset();
+  $('profile-search-log').textContent = '';
+}
+function profileBubble(text, role = 'bot', existing = null) {
+  const log = $('profile-search-log');
+  const bubble = existing || textEl('article', 'profile-chat-bubble ' + role, '');
+  bubble.textContent = '';
+  bubble.append(textEl('div', 'profile-chat-author', role === 'user' ? 'Вы' : 'PriveTek'));
+  bubble.append(textEl('p', '', text));
+  if (!existing) log.append(bubble);
+  log.scrollTop = log.scrollHeight;
+  return bubble;
+}
+function renderProfileSearch(state) {
+  $('profile-search-access').textContent = 'Поиск доступен';
+  $('profile-search-form').hidden = false;
+  $('profile-search-submit').disabled = state.busy;
+}
+function showProfileResults(results, bubble, previous = false) {
+  const reply = profileBubble(previous ? 'Последний сохранённый результат.' : 'Поиск завершён.', 'bot', bubble);
+  const found = results.filter(row => row.status === 'found');
+  reply.append(textEl('p', 'small', 'Найдено профилей: ' + found.length + ' · Источников в ответе: ' + results.length));
+  const items = textEl('ul', 'profile-chat-results', '');
+  const labels = {found: 'Найден профиль', not_found: 'Совпадений не найдено', unavailable: 'Проверка недоступна', skipped: 'Формат имени не подходит'};
+  for (const row of [...found, ...results.filter(row => row.status !== 'found')]) {
+    const item = textEl('li', '', row.site + ' — ' + labels[row.status]);
+    if (row.url) {
+      const link = textEl('a', '', 'Открыть профиль ↗');
+      link.href = row.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      item.append(' ', link);
+    }
+    items.append(item);
+  }
+  reply.append(items, textEl('p', 'small', 'Совпадение username не подтверждает владельца профиля.'));
+  const log = $('profile-search-log');
+  log.scrollTop = log.scrollHeight;
+}
+async function loadProfileSearch(enabled) {
+  clearProfileSearch();
+  if (!enabled) return;
+  const ticket = generation;
+  $('profile-search').hidden = false;
+  $('profile-search-access').textContent = '';
+  profileBubble('Отправьте свой username. Я проверю публичные профили на 17 площадках, включая GitHub, Bluesky, OpenStreetMap и RubyGems. Для Bluesky поддерживаются имена в зоне bsky.social.');
+  try {
+    const state = await api('profile-search');
+    if (ticket !== generation) return;
+    renderProfileSearch(state);
+    if (state.results.length) showProfileResults(state.results, null, true);
+    if (state.busy) profileBubble('Поиск ещё выполняется. Обновите страницу через минуту.');
+    // Start a new visit at the greeting. Keyboard users can scroll the conversation.
+    $('profile-search-log').scrollTop = 0;
+  } catch (error) {
+    if (ticket === generation) profileBubble(error.message);
+  }
+}
+$('profile-search-form').onsubmit = async event => {
+  event.preventDefault();
+  const button = $('profile-search-submit');
+  if (button.disabled) return;
+  const input = $('profile-search-name');
+  const username = input.value.trim();
+  if (!username) {
+    input.focus();
+    return;
+  }
+  const ticket = generation;
+  button.disabled = true;
+  profileBubble(username, 'user');
+  const reply = profileBubble('Проверяю публичные профили…');
+  try {
+    const state = await api('profile-search', {method: 'POST', body: JSON.stringify({
+      username, consent: $('profile-search-consent').checked
+    })});
+    if (ticket !== generation) return;
+    $('profile-search-form').reset();
+    renderProfileSearch(state);
+    showProfileResults(state.results, reply);
+    input.focus();
+  } catch (error) {
+    if (ticket !== generation) return;
+    if (error.status === 401) {
+      signedOut('Сессия завершилась. Войдите снова.');
+      return;
+    }
+    button.disabled = error.status === 409;
+    profileBubble(error.message, 'bot', reply);
+  }
+};
 function renderJob(job) {
   if (!/^[0-9a-f]{32}$/.test(job.id)) return null;
   const row=textEl('article','job',''); row.dataset.id=job.id;
@@ -138,7 +336,7 @@ async function loadJobs(reset=false) {
 }
 $('refresh').onclick=()=>loadJobs(true); $('load-more').onclick=()=>loadJobs(false);
 $('logout').onclick=async()=>{ $('logout').disabled=true; try{await api('auth/logout',{method:'POST',body:'{}'}); signedOut('Вы вышли из кабинета.');}catch(error){handleDashboardError(error);}finally{$('logout').disabled=false;} };
-function openCheck(){draftInForm=null; trackEvent('report_form_open'); message('check-message',''); openDialog('check-dialog'); $('check-dialog').scrollTop=0;}
+function openCheck(){openAccountTab('reports');draftInForm=null; trackEvent('report_form_open'); message('check-message',''); openDialog('check-dialog'); $('check-dialog').scrollTop=0;}
 $('new-check').onclick=openCheck; $('empty-check').onclick=openCheck; $('close-check').onclick=()=>closeDialog('check-dialog');
 $('check-form').onsubmit=async event=>{
   event.preventDefault(); if (!validateCheckForm()) { $('check-form').reportValidity(); return; } $('check-submit').disabled=true; message('check-message','');
@@ -155,6 +353,7 @@ function clearMfaSecrets() {
 }
 function showRecovery(codes) {
   $('mfa-codes-text').textContent=codes.join('\n'); $('mfa-recovery-codes').hidden=!codes.length;
+  if(codes.length) openAccountTab('security');
   if(codes.length) $('mfa-recovery-codes').scrollIntoView({block:'nearest'});
 }
 async function loadSecurity() {
@@ -164,6 +363,11 @@ async function loadSecurity() {
     $('mfa-status').textContent=data.enabled?'2FA включена':'2FA не подключена';
     $('mfa-status').className='badge'+(data.enabled?'':' pending');
     $('mfa-setup-button').hidden=data.enabled;
+    $('mfa-email-button').hidden=data.method==='email';
+    $('mfa-email-button').disabled=false;
+    $('mfa-email-button').textContent=data.enabled?'Перейти на код по email':'Подключить код по email';
+    $('mfa-factor-label').textContent=data.method==='email'?'Резервный код':'Свежий код приложения или резервный код';
+    if(data.method==='email') $('mfa-status').textContent='2FA по email';
     $('mfa-recovery-button').hidden=!data.enabled; $('mfa-disable-button').hidden=!data.enabled;
     $('mfa-factor-field').hidden=!data.enabled; $('mfa-setup-button').disabled=false;
   } catch(error) {if(ticket===generation) message('mfa-message','Не удалось загрузить настройки защиты. Обновите страницу.',true);}
@@ -184,12 +388,16 @@ async function changeSecurity(name) {
     } else {
       await loadSecurity(); if(ticket!==generation)return;
       showRecovery(data.recovery_codes||[]);
-      message('mfa-message',name==='disable'?'2FA отключена. Другие сессии завершены.':name==='confirm'?'2FA подключена. Другие сессии завершены. Сохраните резервные коды.':'Прежние резервные коды отменены. Сохраните новые.');
+      message('mfa-message',name==='disable'?'2FA отключена. Другие сессии завершены.':(name==='confirm'||name==='enable-email')?'2FA подключена. Другие сессии завершены. Сохраните резервные коды.':'Прежние резервные коды отменены. Сохраните новые.');
     }
   } catch(error) {if(ticket===generation) message('mfa-message',error.message,true);}
   finally {securityBusy=false; $('mfa-form').querySelectorAll('button').forEach(b=>b.disabled=false); $('mfa-password').value=''; $('mfa-factor').value='';}
 }
 $('mfa-form').onsubmit=event=>event.preventDefault();
+$('mfa-email-button').onclick=()=>{
+  if(!$('mfa-factor-field').hidden && !confirm('Перейти на коды по email? Прежние резервные коды будут заменены.'))return;
+  changeSecurity('enable-email');
+};
 $('mfa-setup-button').onclick=()=>changeSecurity('setup');
 $('mfa-recovery-button').onclick=()=>{if(confirm('Создать новые резервные коды? Все прежние коды перестанут работать.'))changeSecurity('recovery');};
 $('mfa-disable-button').onclick=()=>{if(confirm('Отключить второй фактор для вашего аккаунта?'))changeSecurity('disable');};
@@ -219,6 +427,22 @@ function renderIdentity() {
     row.append(label);
     if(item.identifier_id) row.append(textEl('p','small','Найдено по '+(labels[item.identifier_id]||'идентификатору')+'. '+(item.evidence==='indirect_signal'?'Косвенный признак регистрации.':'Совпадение источника не подтверждает владельца.')));
     if(item.profile_url) {const link=textEl('a','identity-profile','Открыть профиль ↗');link.href=item.profile_url;link.target='_blank';link.rel='noopener noreferrer';row.append(link);}
+    for (const entry of item.catalogue || []) {
+      const metadata = textEl('p', 'small', (entry.title || entry.name) + ' · ');
+      const source = textEl('a', '', entry.source);
+      source.href = entry.source_url; source.target = '_blank'; source.rel = 'noopener noreferrer';
+      metadata.append(source);
+      if (entry.status === 'available') {
+        metadata.append(' · Дата утечки: ' + entry.breach_date + ' · Обновлено: ' + new Date(entry.refreshed_at).toLocaleString('ru-RU'));
+        const license = textEl('a', '', 'CC BY 4.0');
+        license.href = entry.license_url; license.target = '_blank'; license.rel = 'noopener noreferrer';
+        metadata.append(' · ', license);
+      } else {
+        metadata.append(entry.status === 'not_found' ? ' · Записи сейчас нет в публичном каталоге.' : ' · Метаданные сейчас недоступны.');
+      }
+      row.append(metadata);
+    }
+    if (item.catalogue_omitted) row.append(textEl('p', 'small', 'Другие найденные утечки перечислены в исходном PDF.'));
     row.append(select); $('identity-items').append(row);
   }
   if(snapshot.omitted) $('identity-items').append(textEl('p','small','Часть находок не включена из-за ограничения размера. Смотрите исходный PDF.'));
@@ -234,7 +458,16 @@ async function saveIdentity(itemId,decision) {
   if(identityBusy||!identitySnapshot)return;identityBusy=true;const ticket=identityGeneration;
   $('identity-items').querySelectorAll('select').forEach(el=>el.disabled=true);message('identity-message','Сохраняем отметку…');
   try {const snapshot=await api('jobs/'+identityJob+'/identity',{method:'PUT',body:JSON.stringify({revision:identitySnapshot.revision,item_id:itemId,decision})});
-    if(ticket!==identityGeneration)return;identitySnapshot=snapshot;message('identity-message','Отметка сохранена. Принадлежность указана вами.');
+    if(ticket!==identityGeneration)return;
+    const previous = new Map(identitySnapshot.findings.map(item => [item.id, item]));
+    for (const item of snapshot.findings) {
+      const old = previous.get(item.id);
+      if (old && old.catalogue) {
+        item.catalogue = old.catalogue;
+        item.catalogue_omitted = old.catalogue_omitted;
+      }
+    }
+    identitySnapshot=snapshot;message('identity-message','Отметка сохранена. Принадлежность указана вами.');
   } catch(error) {if(ticket===identityGeneration){if(error.status===401)signedOut('Сессия завершилась. Войдите снова.');else message('identity-message',error.message,true);}}
   finally {identityBusy=false;if(ticket===identityGeneration)renderIdentity();}
 }
@@ -310,7 +543,7 @@ function validateCheckForm() {
     field.setCustomValidity(error); if(error)valid=false;
   }
   const phone=$('phone').value.trim(), digits=phone.replace(/\D/g,'');
-  const error=phone && (!/^\+[0-9\s().-]+$/.test(phone) || digits.length<7 || digits.length>15) ? 'Укажите номер с кодом страны, например +7 912 345-67-89.' : '';
+  const error=(!phone || !/^\+[0-9\s().-]+$/.test(phone) || digits.length<7 || digits.length>15) ? 'Укажите номер с кодом страны, например +7 912 345-67-89.' : '';
   $('phone').setCustomValidity(error); return valid && !error;
 }
 for(const field of [...usernameFields(),$('phone')]) field.addEventListener('input',()=>{validateCheckForm();checkPayload();});
