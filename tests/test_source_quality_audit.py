@@ -129,6 +129,11 @@ def test_leakcheck_result_in_pdf(
     assert expected_group in before_label
 
     if expected_status == "found":
+        assert leakcheck["breach_summary"] == {
+            "match_count": 5,
+            "source_count": 2,
+            "data_classes": ["password"],
+        }
         rows = results["email_breach"]
         expected_rows = [
             ("Synthetic Alpha", "2020-01"),
@@ -141,6 +146,7 @@ def test_leakcheck_result_in_pdf(
         first_page = " ".join(page_texts[0].split())
         assert "Записи об утечках: 2." in first_page
     else:
+        assert "breach_summary" not in leakcheck
         assert results["email_breach"] == ([] if expected_status == "not_found" else None)
         assert "Источник сведений: LeakCheck." not in breach_section
         if expected_status == "unavailable":

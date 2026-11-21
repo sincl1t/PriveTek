@@ -48,6 +48,11 @@ def lookup(email):
             rows.append(dict(source='LeakCheck', name=source['name'], date=date,
                              data_classes=fields, classes_scope='all_matching_breaches'))
         check.update(status='found', reason='Найдены названия утечек. Категории данных относятся ко всем совпадениям вместе; значения данных API не раскрывает.')
+        check['breach_summary'] = dict(
+            match_count=found,
+            source_count=len(sources),
+            data_classes=sorted(set(fields)),
+        )
         return rows, check
     except (httpx.HTTPError, ValueError, TypeError):
         return None, check

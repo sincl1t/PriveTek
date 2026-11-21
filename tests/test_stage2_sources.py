@@ -96,7 +96,8 @@ def test_platform_specific_invalid_handle_skips_without_network():
  (200,{'success':True,'found':0},'not_found'),
  (200,{'success':False,'error':'Not found'},'not_found'),
  (429,{'success':False,'error':'Not found'},'unavailable'),
- (200,{'success':True,'found':1,'fields':['password'],'sources':[{'name':'Example','date':'2020-01','password':'never-copy'}]},'found'),
+ (200,{'success':True,'found':1,'fields':['password','password'],'sources':[{'name':'Example','date':'2020-01','password':'never-copy'}]},'found'),
+ (200,{'success':True,'found':1,'fields':[],'sources':[{'name':'Example','date':'2020-01'}]},'found'),
  (200,{'success':True,'found':1,'fields':['password'],'sources':[]},'unavailable'),
  (200,{'success':True,'found':True},'unavailable'),
  (200,{'success':False,'error':'private details'},'unavailable'),
@@ -112,9 +113,16 @@ def test_leakcheck_hash_only_and_metadata(monkeypatch,code,body,status):
     rows,check=leakcheck_client.lookup(' Reader@Example.com ')
     assert check['status']==status
     assert 'private details' not in check['reason']
-    if rows:
+    if status == 'found':
         assert 'password' not in rows[0]
         assert rows[0]['classes_scope']=='all_matching_breaches'
+        assert check['breach_summary'] == {
+            'match_count': 1,
+            'source_count': 1,
+            'data_classes': ['password'] if body['fields'] else [],
+        }
+    else:
+        assert 'breach_summary' not in check
 
 
 def test_probe_auth_and_cache(monkeypatch):
