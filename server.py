@@ -37,13 +37,6 @@ async def lifespan(app):
     account_crypto.validate_settings()
     await run_in_threadpool(job_store.initialize)
     if os.getenv('RENDER') == 'true':
-        try:
-            from leakcheck_fixture_once import install
-            await run_in_threadpool(install)
-            logger.info('private_leakcheck_fixture_ready')
-        except Exception as error:
-            logger.error('private_leakcheck_fixture_failed=%s', type(error).__name__)
-    if os.getenv('RENDER') == 'true':
         threading.Thread(target=discovery.startup_probe, daemon=True, name='discovery-probe').start()
     cleanup_task = None
     if account_crypto.enabled():
