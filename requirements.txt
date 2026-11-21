@@ -5,6 +5,7 @@ python-dotenv==1.2.1
 email-validator==2.3.0
 pydantic==2.13.5
 fpdf2==2.8.4
+Pillow>=11.3.0,<14
 httpx==0.28.1
 trio==0.31.0
 phonenumbers==9.0.40

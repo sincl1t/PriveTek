@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Личный кабинет — PriveTek</title><link rel="stylesheet" href="/account/assets/account.css"><script src="/account/assets/account-nav.js" defer></script><script src="/account/assets/account.js" defer></script><script src="/account/assets/report-chat.js" defer></script><script src="/account/assets/account-profile.js" defer></script></head>
 <body class="account-shell">
 <header class="header"><a href="https://privetek.ru/" class="brand" aria-label="PriveTek — на главную страницу"><img class="brand-logo" src="/account/assets/brand-logo.png" alt="PriveTek — сервис контроля цифрового следа" width="235" height="62"><span class="brand-caption">Личный кабинет</span></a><div class="header-right"><span class="secure"><span aria-hidden="true">◇</span> Защищённый кабинет</span><div id="profile-shell" class="profile-shell" hidden>
-<button id="profile-toggle" class="avatar-button avatar-sky" type="button" aria-label="Открыть меню профиля" aria-expanded="false" aria-controls="profile-menu"><span id="profile-initials" aria-hidden="true">P</span><span class="avatar-online" aria-hidden="true"></span></button>
+<button id="profile-toggle" class="avatar-button avatar-sky" type="button" aria-label="Открыть меню профиля" aria-expanded="false" aria-controls="profile-menu"><span id="profile-initials" aria-hidden="true">P</span><img id="profile-header-photo" class="avatar-photo" alt="" hidden><span class="avatar-online" aria-hidden="true"></span></button>
 <nav id="profile-menu" class="profile-menu" aria-label="Меню профиля" hidden>
 <div class="profile-menu-heading"><strong id="profile-menu-name">Мой аккаунт</strong><span id="profile-menu-email"></span></div>
 <button type="button" data-profile-open="personal"><span>Личные данные</span><span aria-hidden="true">↗</span></button>
@@ -118,12 +118,14 @@
 <footer class="footer"><span>© PriveTek</span><span>Ваши данные заслуживают внимания.</span></footer>
 <dialog id="profile-dialog" aria-labelledby="profile-title">
 <div class="dialog-head"><h2 id="profile-title">Мой профиль</h2><button id="profile-close" class="text-button" type="button" aria-label="Закрыть профиль">✕</button></div>
-<div class="profile-summary"><span id="profile-avatar-preview" class="profile-avatar avatar-sky" aria-hidden="true">P</span><div><strong id="profile-summary-name">Мой аккаунт</strong><span id="profile-summary-email"></span><span class="profile-verified">Почта подтверждена</span></div></div>
+<div class="profile-summary"><span id="profile-avatar-preview" class="profile-avatar avatar-sky" aria-hidden="true"><span id="profile-preview-initials">P</span><img id="profile-preview-photo" class="avatar-photo" alt="" hidden></span><div><strong id="profile-summary-name">Мой аккаунт</strong><span id="profile-summary-email"></span><span class="profile-verified">Почта подтверждена</span></div></div>
 <nav class="profile-dialog-tabs" aria-label="Разделы профиля"><button type="button" data-profile-view="personal" aria-pressed="true">Личные данные</button><button type="button" data-profile-view="subscription" aria-pressed="false">Подписка</button><button type="button" data-profile-view="settings" aria-pressed="false">Настройки</button></nav>
 <p id="profile-message" class="message" role="status" aria-live="polite" hidden></p>
 <section id="profile-view-personal" aria-label="Личные данные">
-<form id="profile-form"><div class="field"><label for="profile-display-name">Как к вам обращаться</label><input id="profile-display-name" maxlength="80" autocomplete="nickname" placeholder="Ваше имя"><p class="field-hint">Необязательно. Имя используется только в вашем профиле.</p></div>
-<fieldset class="avatar-palette"><legend>Цвет аватара</legend>
+<form id="profile-form">
+<div class="profile-photo-controls"><button id="profile-photo-choose" class="button secondary" type="button" disabled>Загрузить фото</button><button id="profile-photo-remove" class="text-button" type="button" hidden>Удалить фото</button><input id="profile-photo-file" type="file" accept="image/jpeg,image/png,image/webp" hidden><p class="field-hint">JPEG, PNG или WebP до 5 МБ и 25 млн пикселей. Кадрируем по центру под круг. Фото сохраняется сразу, метаданные удаляются.</p><p id="profile-photo-message" class="message" role="status" aria-live="polite" hidden></p></div>
+<div class="field"><label for="profile-display-name">Как к вам обращаться</label><input id="profile-display-name" maxlength="80" autocomplete="nickname" placeholder="Ваше имя"><p class="field-hint">Необязательно. Имя используется только в вашем профиле.</p></div>
+<fieldset class="avatar-palette"><legend>Цвет фона для инициалов</legend>
 <label class="avatar-sky"><input type="radio" name="avatar-theme" value="sky" checked><span class="sr-only">Голубой</span></label>
 <label class="avatar-violet"><input type="radio" name="avatar-theme" value="violet"><span class="sr-only">Сиреневый</span></label>
 <label class="avatar-mint"><input type="radio" name="avatar-theme" value="mint"><span class="sr-only">Мятный</span></label>

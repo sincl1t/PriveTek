@@ -240,6 +240,64 @@ async def profile_put(request: Request):
         raise HTTPException(503, 'Не удалось сохранить профиль. Попробуйте позже') from None
 
 
+@router.get('/api/account/profile/avatar')
+def profile_avatar_get(request: Request):
+    import account_profile
+    ready()
+    user, _ = identify(request)
+    try:
+        content = account_profile.get_avatar(user['id'])
+    except Exception:
+        raise HTTPException(503, 'Не удалось загрузить аватар') from None
+    if content is None:
+        raise HTTPException(404, 'Фотография профиля не загружена')
+    return Response(content, media_type='image/jpeg', headers={**HEADERS, 'Content-Disposition': 'inline'})
+
+
+@router.put('/api/account/profile/avatar')
+async def profile_avatar_put(request: Request):
+    import account_avatar
+    import account_profile
+    ready()
+    origin(request)
+    user, _ = identify(request, mutation=True)
+    if request.headers.get('content-type', '').split(';')[0].lower() not in account_avatar.MIME_TYPES:
+        raise HTTPException(415, 'Выберите JPEG, PNG или WebP')
+    await run_in_threadpool(quota, request, user['email'], 'avatar-upload', 10)
+    if not account_avatar.UPLOAD_SLOTS.acquire(blocking=False):
+        raise HTTPException(429, 'Сейчас загружаются другие фотографии. Попробуйте через несколько секунд')
+    try:
+        content = bytearray()
+        async for chunk in request.stream():
+            if len(chunk) > account_avatar.MAX_UPLOAD - len(content):
+                raise HTTPException(413, 'Размер фотографии — до 5 МБ')
+            content.extend(chunk)
+        try:
+            photo = await run_in_threadpool(account_avatar.canonicalize, bytes(content))
+        except account_avatar.AvatarBusy:
+            raise HTTPException(429, 'Обрабатывается другая фотография. Попробуйте через несколько секунд') from None
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+        try:
+            return result(await run_in_threadpool(account_profile.set_avatar, user['id'], photo))
+        except Exception:
+            raise HTTPException(503, 'Не удалось сохранить фотографию. Попробуйте позже') from None
+    finally:
+        account_avatar.UPLOAD_SLOTS.release()
+
+
+@router.delete('/api/account/profile/avatar')
+def profile_avatar_delete(request: Request):
+    import account_profile
+    ready()
+    origin(request)
+    user, _ = identify(request, mutation=True)
+    try:
+        return result(account_profile.set_avatar(user['id'], None))
+    except Exception:
+        raise HTTPException(503, 'Не удалось удалить фотографию. Попробуйте позже') from None
+
+
 @router.get('/api/account/security')
 def security_status(request: Request):
     import account_mfa
