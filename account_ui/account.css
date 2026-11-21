@@ -545,3 +545,13 @@ body.account-ready {
 }
 
 #profile-close { min-width:44px; border-radius:10px; }
+
+/* Photos are served only to the authenticated owner, never from an external URL. */
+.avatar-button { overflow:visible; }
+.profile-avatar { position:relative; }
+.avatar-photo { position:absolute; inset:0; width:100%; height:100%; border-radius:50%; object-fit:cover; display:block; }
+.avatar-online { z-index:1; }
+.profile-photo-controls { margin:0 0 22px; }
+.profile-photo-controls .button { margin-right:8px; }
+.profile-photo-controls .field-hint { line-height:1.6; margin-top:12px; }
+@media(max-width:360px) { .profile-photo-controls .button { width:100%; margin:0; } }
