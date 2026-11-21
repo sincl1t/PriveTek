@@ -153,6 +153,8 @@ def test_leakcheck_result_in_pdf(
         assert breach_section.count("Другая категория") == 1
         assert breach_section.count("IP-адрес") == 1
         assert "unknown_a" not in pdf_text and "unknown_b" not in pdf_text
+        profiles_section = pdf_text.split("Публичные профили по username", 1)[1]
+        assert "GitHub: Не проверялось" in profiles_section
         first_page = " ".join(page_texts[0].split())
         count_line = "LeakCheck • Обнаружено записей: 5 • Источников утечек: 2"
         assert count_line in first_page

@@ -293,11 +293,12 @@ def create_report(data, output_dir=None):
                 leakcheck = leakcheck_breach_summary(data)
                 if leakcheck is not None:
                     fields = leakcheck['data_classes']
-                    labels = dict.fromkeys(LEAKCHECK_CLASS_LABELS[field] for field in fields
-                                           if field in LEAKCHECK_CLASS_LABELS)
+                    category_labels = dict.fromkeys(LEAKCHECK_CLASS_LABELS[field] for field in fields
+                                                    if field in LEAKCHECK_CLASS_LABELS)
                     if any(field not in LEAKCHECK_CLASS_LABELS for field in fields):
-                        labels['Другая категория'] = None
-                    category_line = 'Категории данных по всем совпадениям: ' + ' • '.join(labels) if labels else ''
+                        category_labels['Другая категория'] = None
+                    category_line = ('Категории данных по всем совпадениям: ' + ' • '.join(category_labels)
+                                     if category_labels else '')
                     category_height = height(category_line, pdf.epw, 10, 6) if category_line else 0
                     if pdf.will_page_break(6 + category_height + 35):
                         pdf.add_page()
