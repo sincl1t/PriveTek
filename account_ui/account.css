@@ -370,7 +370,7 @@ body.account-ready {
 .account-ready #report-chat-options:empty { margin:0; }
 .account-ready .profile-chat-form { padding:20px 26px 26px; }
 .account-ready #profile-search-log { margin:20px 26px 0; }
-.account-ready :focus-visible { outline:3px solid #9ad3ff; outline-offset:3px; }
+.account-ready :focus-visible,.account-ready .profile-chat-compose input:focus-visible { outline:3px solid #9ad3ff; outline-offset:3px; }
 @media (max-width:1100px) {
   #dashboard { grid-template-columns:220px minmax(0,1fr); column-gap:24px; }
   .account-ready main { padding:0 28px; }
@@ -464,7 +464,7 @@ body.account-ready {
 .account-ready #mfa-secret,.account-ready .identity-item select,.account-ready .profile-chat-compose input { background:#0a121c; color:#eff5fc; border-color:#3d536b; }
 .account-ready #mfa-codes-text { background:#17283b; color:#d8ebff; }
 .account-ready .monitor-run,.account-ready .monitor-item { border-color:#263449; }
-.account-ready .skip-link:focus { background:#cce9ff; color:#091b2b; }
+.account-shell .skip-link:focus { background:#cce9ff; color:#091b2b; }
 @media(max-width:640px) {
   .dashboard-heading h1 { font-size:29px; line-height:1.12; letter-spacing:-.9px; }
   .dashboard-heading h1 span { margin-top:5px; }
