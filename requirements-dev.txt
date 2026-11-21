@@ -1,3 +1,6 @@
 -r requirements.txt
+# Starlette <1 (required by our FastAPI) uses aliases deprecated in AnyIO 4.15.
+# Remove this test-only bound once FastAPI supports the fixed Starlette >=1.7.
+anyio<4.15
 pytest==8.4.2
 pypdf==6.19.0
