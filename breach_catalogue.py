@@ -5,6 +5,7 @@ import httpx
 import psycopg
 
 import job_store
+import source_limits
 from tools.breach_index import SOURCE, LICENSE, TTL, fetch, valid_name
 
 MAX_NAMES = 3
@@ -35,7 +36,7 @@ def lookup(client, name):
 
 
 def decorate(snapshot):
-    with httpx.Client(timeout=2, follow_redirects=False,
+    with httpx.Client(**source_limits.sync_options(), timeout=2, follow_redirects=False,
                       headers={'User-Agent': 'PriveTek-Catalogue/1.0 (+https://privetek.ru/)'}) as client:
         for item in snapshot.get('findings', []):
             if item.get('source') != 'HIBP' or item.get('kind') != 'breach':

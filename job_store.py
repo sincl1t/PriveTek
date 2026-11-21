@@ -56,22 +56,26 @@ def record(job_id, status, owner_email=None):
     if not enabled():
         return
     with connect() as connection:
-        connection.execute('''INSERT INTO privetek_jobs (id, status) VALUES (%s, %s)
-            ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status,
-            updated_at = CURRENT_TIMESTAMP''', (job_id, status))
-        connection.execute('INSERT INTO privetek_job_events (job_id, status) VALUES (%s, %s)',
-                           (job_id, status))
-        if owner_email is not None:
-            from account_crypto import email_key
-            connection.execute('''INSERT INTO privetek_job_owners (job_id,email_key)
-                VALUES (%s,%s) ON CONFLICT (job_id) DO NOTHING''',
-                (job_id, email_key(owner_email)))
-        if status == 'accepted':
-            import acquisition
-            acquisition.transaction_event(connection, acquisition.job_event, job_id, 'report_ordered')
-        elif status == 'failed':
-            import acquisition
-            acquisition.transaction_event(connection, acquisition.job_event, job_id, 'report_failed')
+        record_in(connection, job_id, status, owner_email)
+
+
+def record_in(connection, job_id, status, owner_email=None):
+    connection.execute('''INSERT INTO privetek_jobs (id, status) VALUES (%s, %s)
+        ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status,
+        updated_at = CURRENT_TIMESTAMP''', (job_id, status))
+    connection.execute('INSERT INTO privetek_job_events (job_id, status) VALUES (%s, %s)',
+                       (job_id, status))
+    if owner_email is not None:
+        from account_crypto import email_key
+        connection.execute('''INSERT INTO privetek_job_owners (job_id,email_key)
+            VALUES (%s,%s) ON CONFLICT (job_id) DO NOTHING''',
+            (job_id, email_key(owner_email)))
+    if status == 'accepted':
+        import acquisition
+        acquisition.transaction_event(connection, acquisition.job_event, job_id, 'report_ordered')
+    elif status == 'failed':
+        import acquisition
+        acquisition.transaction_event(connection, acquisition.job_event, job_id, 'report_failed')
 
 
 def get(job_id):

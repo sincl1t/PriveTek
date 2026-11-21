@@ -3,6 +3,7 @@ import hashlib
 import threading
 import time
 import httpx
+import source_limits
 from report_data import utc_now
 from public_sources import USER_AGENT
 
@@ -22,7 +23,7 @@ def lookup(email):
             if delay > 0:
                 time.sleep(delay)
             _last_request = time.monotonic()
-            response = httpx.get('https://leakcheck.io/api/public', params={'check': digest},
+            response = source_limits.get('https://leakcheck.io/api/public', params={'check': digest},
                                  headers={'User-Agent': USER_AGENT}, timeout=15, follow_redirects=False)
         body = response.json()
         if response.status_code == 200 and isinstance(body, dict) and body.get('success') is False and body.get('error') == 'Not found':

@@ -15,6 +15,7 @@ import account_crypto
 import discovery
 import job_store
 import public_sources
+import source_limits
 
 EXTRA_SOURCES = (
     ('Bluesky', 'https://bsky.app/profile/{username}.bsky.social', r'[A-Za-z0-9][A-Za-z0-9-]{0,62}'),
@@ -81,7 +82,7 @@ async def search_sources(username):
     results = [dict(site=source[0], status='unavailable', url=None) for source, _ in checks]
     limiter = trio.CapacityLimiter(5)
 
-    async with httpx.AsyncClient(timeout=6, follow_redirects=False, headers={
+    async with httpx.AsyncClient(**source_limits.async_options(), timeout=6, follow_redirects=False, headers={
         'User-Agent': public_sources.USER_AGENT, 'Accept': 'application/json'
     }) as client:
         async def run_one(index, source, adapter):
