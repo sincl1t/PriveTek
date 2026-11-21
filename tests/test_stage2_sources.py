@@ -96,7 +96,8 @@ def test_platform_specific_invalid_handle_skips_without_network():
  (200,{'success':True,'found':0},'not_found'),
  (200,{'success':False,'error':'Not found'},'not_found'),
  (429,{'success':False,'error':'Not found'},'unavailable'),
- (200,{'success':True,'found':1,'fields':['password'],'sources':[{'name':'Example','date':'2020-01','password':'never-copy'}]},'found'),
+ (200,{'success':True,'found':1,'fields':['password','password'],'sources':[{'name':'Example','date':'2020-01','password':'never-copy'}]},'found'),
+ (200,{'success':True,'found':1,'fields':[],'sources':[{'name':'Example','date':'2020-01'}]},'found'),
  (200,{'success':True,'found':1,'fields':['password'],'sources':[]},'unavailable'),
  (200,{'success':True,'found':True},'unavailable'),
  (200,{'success':False,'error':'private details'},'unavailable'),
@@ -112,9 +113,15 @@ def test_leakcheck_hash_only_and_metadata(monkeypatch,code,body,status):
     rows,check=leakcheck_client.lookup(' Reader@Example.com ')
     assert check['status']==status
     assert 'private details' not in check['reason']
-    if rows:
-        assert 'password' not in rows[0]
-        assert rows[0]['classes_scope']=='all_matching_breaches'
+    if status == 'found':
+        assert rows == [{'source': 'LeakCheck', 'name': 'Example', 'date': '2020-01'}]
+        assert check['breach_summary'] == {
+            'match_count': 1,
+            'source_count': 1,
+            'data_classes': ['password'] if body['fields'] else [],
+        }
+    else:
+        assert 'breach_summary' not in check
 
 
 def test_probe_auth_and_cache(monkeypatch):
@@ -152,10 +159,27 @@ def test_leakcheck_enforces_request_spacing(monkeypatch):
 def test_leakcheck_pdf_labels_provider_and_global_categories(tmp_path):
     from pypdf import PdfReader
     from pdf_gen import create_report
-    data={'checks':[dict(source='LeakCheck',kind='breach',status='found',reason='Метаданные')],
-          'email_breach':[dict(source='LeakCheck',name='Example',date='2020-01',data_classes=['password'],classes_scope='all_matching_breaches')]}
-    text=''.join(page.extract_text() for page in PdfReader(create_report(data,tmp_path)).pages)
-    assert 'Источник сведений: LeakCheck.' in text
-    assert 'Категории во всех совпавших утечках: пароли' in text
+    data = {
+        'checks': [dict(source=source, kind='breach', status='found', reason='Метаданные')
+                   for source in ('HIBP', 'LeakCheck')],
+        'email_breach': [
+            dict(source='HIBP', name='HIBP Example', date='2020-01', data_classes=['Email addresses']),
+            dict(source='LeakCheck', name='Legacy Alpha', date='2021-01', data_classes=['password'],
+                 classes_scope='all_matching_breaches'),
+            dict(source='LeakCheck', name='Legacy Beta', date='2022-02', data_classes=['password', 'phone'],
+                 classes_scope='all_matching_breaches'),
+        ],
+    }
+    pages = PdfReader(create_report(data, tmp_path)).pages
+    first_page = ' '.join(pages[0].extract_text().split())
+    text = ' '.join(' '.join(page.extract_text() for page in pages).split())
+    assert 'HIBP. Источников утечек: 1.' in first_page
+    assert 'LeakCheck • Источников утечек: 2' in first_page
+    assert 'Обнаружено записей' not in first_page
+    assert 'Источник сведений: HIBP. Данные в утечке: email' in text
+    assert 'Категории данных по всем совпадениям: Пароль • Номер телефона' in text
+    assert text.count('Категории данных по всем совпадениям:') == 1
+    assert 'Legacy Alpha Дата утечки: 2021-01' in text
+    assert 'Legacy Beta Дата утечки: 2022-02' in text
+    assert 'Источник сведений: LeakCheck.' not in text
     assert 'Powered by LeakCheck' in text
-    assert 'Источник сведений: HIBP.' not in text

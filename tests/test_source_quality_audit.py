@@ -58,7 +58,7 @@ def no_live_network(monkeypatch):
                 json={
                     "success": True,
                     "found": 5,
-                    "fields": ["password"],
+                    "fields": ["password", "city", "ip", "ip1", "unknown_a", "unknown_b", "zip"],
                     "sources": [
                         {"name": "Synthetic Alpha", "date": "2020-01"},
                         {"name": "Synthetic Beta", "date": "2021-02"},
@@ -129,20 +129,51 @@ def test_leakcheck_result_in_pdf(
     assert expected_group in before_label
 
     if expected_status == "found":
+        from analysis_layer import analyze
+        from report_insights import insights
+
+        assert leakcheck["breach_summary"] == {
+            "match_count": 5,
+            "source_count": 2,
+            "data_classes": ["city", "ip", "ip1", "password", "unknown_a", "unknown_b", "zip"],
+        }
         rows = results["email_breach"]
-        expected_rows = [
-            ("Synthetic Alpha", "2020-01"),
-            ("Synthetic Beta", "2021-02"),
+        assert rows == [
+            {"source": "LeakCheck", "name": "Synthetic Alpha", "date": "2020-01"},
+            {"source": "LeakCheck", "name": "Synthetic Beta", "date": "2021-02"},
         ]
-        assert [(row["name"], row["date"]) for row in rows] == expected_rows
-        for name, date in expected_rows:
-            assert f"{name} Дата утечки: {date}. Источник сведений: LeakCheck." in breach_section
-        assert breach_section.count("Категории во всех совпавших утечках: пароли") == 2
-        first_page = " ".join(page_texts[0].split())
-        assert "Записи об утечках: 2." in first_page
-    else:
-        assert results["email_breach"] == ([] if expected_status == "not_found" else None)
+        for row in rows:
+            source_line = f"{row['name']} Дата утечки: {row['date']}"
+            assert source_line in breach_section
+            assert source_line + "." not in breach_section
         assert "Источник сведений: LeakCheck." not in breach_section
+        category_label = "Категории данных по всем совпадениям"
+        assert breach_section.count(category_label) == 1
+        assert f"{category_label}: Город • IP-адрес • Пароль • Почтовый индекс • Другая категория" in breach_section
+        assert breach_section.count("Другая категория") == 1
+        assert breach_section.count("IP-адрес") == 1
+        assert "unknown_a" not in pdf_text and "unknown_b" not in pdf_text
+        profiles_section = pdf_text.split("Публичные профили по username", 1)[1]
+        assert "GitHub: Не проверялось" in profiles_section
+        first_page = " ".join(page_texts[0].split())
+        count_line = "LeakCheck • Обнаружено записей: 5 • Источников утечек: 2"
+        assert count_line in first_page
+        assert count_line in [" ".join(line.split()) for line in insights(results)[0]]
+        count_lines = [line.strip() for line in page_texts[0].splitlines()]
+        heading = count_lines.index("LeakCheck")
+        assert count_lines[heading + 1:heading + 3] == [
+            "• Обнаружено записей: 5", "• Источников утечек: 2",
+        ]
+        item, = analyze(results)["items"]
+        assert item["classes"] == ["ip", "password"]
+        assert item["record_count"] == 2
+        assert item["classes_scope"] == "provider_global"
+        assert item["priority"] == "review"
+        assert not item["record_password_category"]
+    else:
+        assert "breach_summary" not in leakcheck
+        assert results["email_breach"] == ([] if expected_status == "not_found" else None)
+        assert "Источники утечек LeakCheck" not in breach_section
         if expected_status == "unavailable":
             assert "LeakCheck: Находок в источнике нет" not in breach_section
 

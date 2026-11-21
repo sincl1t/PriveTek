@@ -1,5 +1,20 @@
 """Conservative report summaries: uncertain results never count as completed."""
-from report_data import prepare
+from report_data import leakcheck_breach_summary, prepare
+
+
+def breach_count_lines(data):
+    lines = []
+    hibp_count = sum(row.get('source', 'HIBP') == 'HIBP' for row in data.get('email_breach') or [])
+    if hibp_count:
+        lines.append(f'HIBP. Источников утечек: {hibp_count}.')
+    leakcheck = leakcheck_breach_summary(data)
+    if leakcheck is not None:
+        counters = []
+        if 'match_count' in leakcheck:
+            counters.append(f"Обнаружено записей: {leakcheck['match_count']}")
+        counters.append(f"Источников утечек: {leakcheck['source_count']}")
+        lines.append('\n'.join(['LeakCheck', *(f'\u2002\u2002• {counter}' for counter in counters)]))
+    return lines
 
 def insights(data):
     data = prepare(data)
@@ -27,7 +42,8 @@ def insights(data):
     summary = [outcome,
                f'Проверок в отчёте: {len(checks)}. С определённым результатом: {completed}.',
                f'Неопределённых: {uncertain}. Недоступных: {unavailable}. Пропущено или отключено: {skipped}.',
-               f'Записей об утечках: {len(breaches)}. Возможных регистраций: {possible}. Публичных аватаров: {avatars}. Публичных профилей: {profiles}.']
+               *breach_count_lines(data),
+               f'Возможных регистраций: {possible}. Публичных аватаров: {avatars}. Публичных профилей: {profiles}.']
     from analysis_layer import analyze
     active = [item for item in analyze(data)['items'] if item['priority'] != 'excluded']
     active_categories = {item['category'] for item in active}

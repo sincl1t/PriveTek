@@ -53,6 +53,30 @@ def prepare(data):
     return result
 
 
+def leakcheck_breach_summary(data):
+    for check in data.get('checks') or []:
+        if not isinstance(check, dict):
+            continue
+        summary = check.get('breach_summary')
+        if (check.get('source') == 'LeakCheck' and check.get('kind') == 'breach'
+                and check.get('status') == 'found' and isinstance(summary, dict)):
+            return summary
+
+    # Older results stored the shared categories on each source row.
+    breaches = data.get('email_breach')
+    if not isinstance(breaches, list):
+        return None
+    rows = [row for row in breaches if isinstance(row, dict) and row.get('source') == 'LeakCheck']
+    if not rows:
+        return None
+    classes = set()
+    for row in rows:
+        fields = row.get('data_classes')
+        if isinstance(fields, list):
+            classes.update(field for field in fields if isinstance(field, str))
+    return dict(source_count=len(rows), data_classes=sorted(classes))
+
+
 def display_time(value):
     if not value:
         return 'время не записано'

@@ -3,6 +3,7 @@ from collections import Counter
 from copy import deepcopy
 import json
 from identity_resolution import canonical_profile, key
+from report_data import leakcheck_breach_summary
 
 VERSION = 1
 CLASS_ALIASES = {'Passwords':'password','password':'password','Email addresses':'email','email':'email',
@@ -65,20 +66,24 @@ def make_basis(data):
         group['conflict'] = 'found' in statuses and 'not_found' in statuses
         if group['category'] != 'breach':
             continue
-        records = {}; global_classes = set(); record_classes = set(); scopes = set()
+        records = set(); global_classes = set(); record_classes = set(); scopes = set()
+        leakcheck = leakcheck_breach_summary(data) if group['source'] == 'LeakCheck' else None
+        if leakcheck is not None:
+            scopes.add('provider_global')
+            global_classes.update(class_aliases(leakcheck['data_classes']))
         breaches = data.get('email_breach') or []
         for row in breaches if isinstance(breaches,list) else []:
             if not isinstance(row,dict) or row.get('source','HIBP') != group['source']:
                 continue
-            scope = 'provider_global' if row.get('classes_scope') else 'per_record'
+            scope = 'provider_global' if leakcheck is not None or row.get('classes_scope') else 'per_record'
             scopes.add(scope)
             record_key = (str(row.get('name','')).strip().casefold(),str(row.get('date','')),scope)
-            supplied_classes = row.get('data_classes',[])
-            classes = {CLASS_ALIASES[c] for c in (supplied_classes if isinstance(supplied_classes,list) else []) if isinstance(c,str) and c in CLASS_ALIASES}
             if record_key in records:
                 duplicates += 1
-            records.setdefault(record_key,set()).update(classes)
-            (global_classes if scope == 'provider_global' else record_classes).update(classes)
+            records.add(record_key)
+            if leakcheck is None:
+                classes = class_aliases(row.get('data_classes'))
+                (global_classes if scope == 'provider_global' else record_classes).update(classes)
         group['record_count'] = len(records)
         group['classes'] = sorted(record_classes | global_classes)
         group['classes_scope'] = 'mixed' if len(scopes)>1 else next(iter(scopes)) if scopes else 'unknown'
@@ -88,6 +93,12 @@ def make_basis(data):
     for index, group in enumerate(result):
         group['fact_id'] = 'F' + str(index+1)
     return dict(version=VERSION,groups=result,coverage=dict(coverage),duplicates_grouped=duplicates)
+
+
+def class_aliases(fields):
+    if not isinstance(fields, list):
+        return set()
+    return {CLASS_ALIASES[field] for field in fields if isinstance(field, str) and field in CLASS_ALIASES}
 
 
 def analyze(data):
