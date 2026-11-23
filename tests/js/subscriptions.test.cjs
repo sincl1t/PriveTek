@@ -1,0 +1,15 @@
+const assert=require('node:assert/strict');
+const c=require('../../account_ui/subscription-core.js');
+const text='date;merchant;amount;currency\n2026-01-31;Demo;-499,00;RUB\n2026-02-28;Demo;-499,00;RUB\n2026-03-31;Demo;-499,00;RUB\n2026-03-31;Demo;-499,00;RUB\n2026-03-31;Salary;100000;RUB\n2026-02-30;Bad;-99;RUB\n';
+let r=c.analyze(text,{sign:'negative'});assert.equal(r.items.length,1);assert.equal(r.items[0].period,'monthly');assert.equal(r.stats.duplicates,1);assert.equal(r.stats.invalid,1);assert.equal(r.stats.incoming,1);assert.equal(c.nextDate(r.items[0]),'2026-04-30');
+assert.deepEqual(c.totals([{...r.items[0],status:'active'},{...r.items[0],status:'cancelled'}]),{RUB:499});
+r=c.analyze('date,merchant,amount,currency\n2025-02-15,"Name, LLC",100,USD\n2026-02-15,"Name, LLC",100,USD',{sign:'positive'});assert.equal(r.items[0].period,'yearly');assert.equal(r.items[0].merchant,'Name, LLC');assert.equal(c.nextDate(r.items[0]),'2027-02-15');
+assert.equal(c.analyze('date;merchant;amount;currency\n2026-01-01;Shop;-10;RUB\n2026-02-01;Shop;-30;RUB').items.length,0);
+assert.equal(c.analyze('date;merchant;amount;currency\n2026-01-01;Shop;-10;RUB\n2026-02-01;Shop;-10;USD').items.length,0);
+assert.throws(()=>c.analyze('date;merchant;amount\n2026-01-01;"unclosed;2'),/кавычки/);
+assert.throws(()=>c.analyze('date;something\na;b'),/колонки/);
+assert.equal(c.parseDate('2026-02-30'),null);
+assert.equal(c.nextDate({last_date:'2024-02-29',period:'yearly'}),'2025-02-28');
+r=c.analyze('Дата;Описание;Сумма\n01.01.2026;Оплата;-100\n01.02.2026;Оплата;-100',{currency:'RUB'});assert.equal(r.items.length,1);
+assert.equal(c.analyze('date;merchant;amount;currency\n2026-01-01;Refund;10;RUB\n2026-02-01;Refund;10;RUB').items.length,0);
+console.log('Subscription CSV and recurrence checks passed');

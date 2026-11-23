@@ -555,3 +555,22 @@ body.account-ready {
 .profile-photo-controls .button { margin-right:8px; }
 .profile-photo-controls .field-hint { line-height:1.6; margin-top:12px; }
 @media(max-width:360px) { .profile-photo-controls .button { width:100%; margin:0; } }
+
+/* Subscription review: statements stay local, metadata is owner scoped. */
+.subscription-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:20px 0}
+.subscription-fields input,.subscription-fields select,.subscription-item select{width:100%;min-width:0;min-height:44px;padding:10px;border-radius:10px;background:#14263b;color:#eaf3ff;border:1px solid #476181;font:inherit}
+.subscription-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0}
+.subscription-item{padding:20px;border:1px solid #405674;border-radius:16px;background:#101e30;overflow-wrap:anywhere}
+.subscription-item h3{margin-top:0}.subscription-item p{font-size:.95rem;line-height:1.6}.subscription-item button{margin-top:14px}
+.subscription-actions{display:flex;flex-wrap:wrap;gap:12px;margin:20px 0}.subscription-total{font-size:1.15rem;color:#b9dcff}
+#account-panel-subscriptions details{margin:24px 0}#account-panel-subscriptions summary{cursor:pointer;min-height:44px;padding:10px 0}
+#account-panel-subscriptions input[type=file]{max-width:100%}#account-panel-subscriptions button{white-space:normal}
+@media(max-width:650px){.subscription-fields,.subscription-grid{grid-template-columns:1fr}.subscription-actions{flex-direction:column}.subscription-actions button{width:100%}}
+#account-panel-subscriptions .security-card{background:linear-gradient(145deg,#111e2e,#0b1420);color:#dae6f6;border:1px solid #344961;border-radius:22px;overflow:hidden}
+#account-panel-subscriptions h2,#account-panel-subscriptions h3,#account-panel-subscriptions label,#account-panel-subscriptions summary{color:#f0f6ff}
+#account-panel-subscriptions .security-content>p{color:#b9c9df}
+#account-panel-subscriptions .security-content{padding:26px}
+@media(max-width:650px){#account-panel-subscriptions .security-content{padding:18px}}
+#account-panel-subscriptions .small,#account-panel-subscriptions .muted{color:#aebfd5}
+#account-panel-subscriptions .button.secondary{background:#1d314a;color:#e7f2ff;border:1px solid #58718f}
+#account-panel-subscriptions .button:disabled{opacity:.55}

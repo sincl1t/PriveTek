@@ -39,13 +39,13 @@ def result(data, status=200):
     return JSONResponse(jsonable_encoder(data), status_code=status, headers=HEADERS)
 
 
-async def body(request):
+async def body(request, max_bytes=4096):
     if request.headers.get('content-type', '').split(';')[0] != 'application/json':
         raise HTTPException(415, 'Ожидается JSON')
     content = bytearray()
     async for chunk in request.stream():
         content.extend(chunk)
-        if len(content) > 4096:
+        if len(content) > max_bytes:
             raise HTTPException(413, 'Слишком большой запрос')
     try:
         value = json.loads(content)
@@ -210,6 +210,36 @@ def me(request: Request):
     if profile_search.enabled():
         payload['profile_search_enabled'] = True
     return result(payload)
+
+
+@router.get('/api/account/subscriptions')
+def subscriptions_get(request: Request):
+    import subscription_store
+    ready()
+    user, _ = identify(request)
+    try:
+        return result(subscription_store.read(user['id']))
+    except Exception:
+        raise HTTPException(503, 'Не удалось загрузить подписки') from None
+
+
+@router.put('/api/account/subscriptions')
+async def subscriptions_put(request: Request):
+    import subscription_store
+    ready()
+    origin(request)
+    user, _ = identify(request, mutation=True)
+    data = await body(request, max_bytes=65536)
+    try:
+        data = subscription_store.normalize(data)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    try:
+        return result(await run_in_threadpool(subscription_store.save, user['id'], data))
+    except subscription_store.Conflict:
+        raise HTTPException(409, 'Список изменён в другом окне. Загрузите сохранённый список перед повторным сохранением') from None
+    except Exception:
+        raise HTTPException(503, 'Не удалось сохранить подписки') from None
 
 
 @router.get('/api/account/profile')
@@ -397,7 +427,7 @@ def page():
 
 @router.get('/account/assets/{name}', include_in_schema=False)
 def asset(name: str):
-    allowed = {'account-profile.js':'application/javascript', 'account-nav.js':'application/javascript', 'report-chat.js':'application/javascript', 'start.js':'application/javascript', 'landing-handoff.js':'application/javascript', 'account.css': 'text/css', 'account.js': 'application/javascript',
+    allowed = {'subscription-core.js':'application/javascript', 'subscriptions.js':'application/javascript', 'account-profile.js':'application/javascript', 'account-nav.js':'application/javascript', 'report-chat.js':'application/javascript', 'start.js':'application/javascript', 'landing-handoff.js':'application/javascript', 'account.css': 'text/css', 'account.js': 'application/javascript',
                'brand-logo.png': 'image/png', 'brand-background.jpg': 'image/jpeg',
                'tildasans.woff2': 'font/woff2'}
     if name not in allowed:
