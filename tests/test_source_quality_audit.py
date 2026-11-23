@@ -337,13 +337,40 @@ def test_profile_failure_does_not_hide_other_source(monkeypatch, tmp_path, unava
     "response,expected_status,reason_fragment",
     [
         pytest.param(
-            httpx.Response(200, text='<form><input name="password" type="password"></form>'),
+            httpx.Response(200, text='<form method="post" action="/ap/signin">'
+                                     '<input name="password" type="password"></form>'),
             "possible", "Косвенный признак", id="password-form",
+        ),
+        pytest.param(
+            httpx.Response(200, text='<form id="ap_login_form" method="post" action="/ax/claim">'
+                                     '<input name="email" type="text">'
+                                     '<input id="auth-credential-autofill-hint" class="aok-hidden" '
+                                     'name="password" type="password">'
+                                     '<div id="invalid-phone-alert" class="aok-hidden">Invalid mobile number</div></form>'),
+            "unavailable", "распознаваемый результат", id="hidden-autofill",
+        ),
+        pytest.param(
+            httpx.Response(200, text='<form method="post" action="/ap/signin">'
+                                     '<div style="display: none"><input name="password" type="password"></div></form>'),
+            "unavailable", "распознаваемый результат", id="hidden-password-container",
+        ),
+        pytest.param(
+            httpx.Response(200, text='<form method="post" action="/ax/claim">'
+                                     '<input name="email" type="text">'
+                                     '<input id="auth-credential-autofill-hint" class="aok-hidden" '
+                                     'name="password" type="password">'
+                                     '<div id="invalid-phone-alert">Invalid mobile number</div></form>'),
+            "unavailable", "Amazon отклонил номер телефона", id="invalid-mobile-number",
         ),
         pytest.param(
             httpx.Response(200, text="<h1>Looks like you're new to Amazon</h1>"
                                      "<button>Proceed to create an account</button>"),
-            "unavailable", "распознаваемый результат", id="new-account-screen",
+            "not_found", "Amazon предложил создать аккаунт", id="new-account-screen",
+        ),
+        pytest.param(
+            httpx.Response(200, text="<template><h1>Looks like you're new to Amazon</h1>"
+                                     "<button>Proceed to create an account</button></template>"),
+            "unavailable", "распознаваемый результат", id="hidden-new-account-screen",
         ),
         pytest.param(
             httpx.ReadTimeout("Synthetic read timeout"),
@@ -396,7 +423,7 @@ def test_amazon_phone_result_in_pdf(monkeypatch, tmp_path, response, expected_st
         "Публичные профили по username", 1,
     )[0]
     assert reason_fragment in section
-    assert "Amazon: Находок в источнике нет" not in section
+    assert ("Amazon: Находок в источнике нет" in section) == (expected_status == "not_found")
     findings = results["identity_resolution"]["findings"]
     if expected_status == "possible":
         finding, = findings
@@ -406,6 +433,10 @@ def test_amazon_phone_result_in_pdf(monkeypatch, tmp_path, response, expected_st
         assert finding["identifier_id"] == "identifier-phone"
         assert "Находки и возможные совпадения Amazon: Возможная регистрация" in section
         assert "Косвенный признак." in pdf_text
+    elif expected_status == "not_found":
+        assert findings == []
+        assert results["phone_registrations"] == []
+        assert "Проверки без находок Amazon: Находок в источнике нет" in section
     else:
         assert findings == []
         assert results["phone_registrations"] is None

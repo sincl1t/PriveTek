@@ -67,7 +67,7 @@ def test_phone_source_posts_country_code_and_number(action):
             if request.method == 'GET':
                 return httpx.Response(200,text=f'<form method="post" action="{action}"><input name="email"><input type="hidden" name="token" value="abc"></form>')
             assert b'email=12025550123' in request.content
-            return httpx.Response(200,text='<form><input name="password" type="password"></form>')
+            return httpx.Response(200,text='<form method="post" action="/ap/signin"><input name="password" type="password"></form>')
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             out=[]
             await amazon_phone('2025550123','1',client,out)
@@ -138,7 +138,7 @@ def test_amazon_redirect_is_bounded_and_same_origin(location,expected_requests):
                 return httpx.Response(200,text='<form method="post" action="/ax/claim"><input name="email"></form>')
             if request.method=='POST':
                 return httpx.Response(302,headers={'Location':location})
-            return httpx.Response(200,text='<form><input name="password" type="password"></form>')
+            return httpx.Response(200,text='<form method="post" action="/ap/signin"><input name="password" type="password"></form>')
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             out=[]
             await amazon_phone('2025550123','1',client,out)

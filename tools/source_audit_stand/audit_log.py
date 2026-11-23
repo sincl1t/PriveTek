@@ -1,11 +1,13 @@
 """Readable audit evidence: request → response → product result → actual PDF text."""
 import json
 import re
+from urllib.parse import parse_qs, urlsplit
 
 from helpers import trace_context, trace_lock
 
 SOURCES = {'LeakCheck', 'GitHub', 'GitLab', 'Amazon'}
 PHONE_QUERY = 'submitted'
+AMAZON_PATHS = {'/ap/signin', '/ap/signin/', '/ax/claim', '/ax/claim/intent', '/ap/register'}
 LABELS = {'found': 'Найдены сведения', 'not_found': 'Находок в источнике нет',
           'possible': 'Возможная регистрация', 'unknown': 'Неопределённый результат',
           'unavailable': 'Проверка недоступна', 'skipped': 'Не проверялось',
@@ -32,11 +34,39 @@ def begin(email, usernames, *, phone_supplied=False):
     trace_context.audit_checks = []
 
 
-def request(source, query, method, url, mode='live'):
+def request(source, query, method, url, mode='live', details=None):
     requests = getattr(trace_context, 'audit_requests', None)
     if requests is not None:
         requests[(source, query)] = f'{method} {url}'
-    event(source, query, 'ЗАПРОС', f'{method} {url} | mode={mode}')
+    summary = f'{method} {url} | mode={mode}'
+    if details is not None:
+        summary += f' | {compact(details)}'
+    event(source, query, 'ЗАПРОС', summary)
+
+
+def amazon_form(request):
+    """Describe an outgoing form without logging its identifier or tokens."""
+    fields = parse_qs(request.content.decode('utf-8', errors='replace'), keep_blank_values=True)
+    claim_type = fields.get('claimType', [None])[0]
+    country_code = fields.get('countryCode', [None])[0]
+    identifier = fields.get('email', [None])[0]
+    details = {
+        'claimType': claim_type if claim_type in (None, '', 'phoneNumber', 'email', 'emailAddress') else '[other]',
+        'countryCode': country_code if not country_code or re.fullmatch(r'[A-Z]{2}', country_code) else '[other]',
+        'email_has_plus': identifier.startswith('+') if identifier is not None else None,
+        'email_digit_count': sum(character.isdecimal() for character in identifier) if identifier is not None else None,
+    }
+    return details
+
+
+def amazon_location_path(location):
+    if location is None:
+        return None
+    try:
+        path = urlsplit(location).path
+    except ValueError:
+        return '/[redacted]'
+    return path if path in AMAZON_PATHS else '/[redacted]'
 
 
 def response_fields(source, payload):
@@ -68,7 +98,8 @@ def response_fields(source, payload):
 def response(source, query, http_response, elapsed_ms):
     if source == 'Amazon':
         fields = {'content_type': http_response.headers.get('content-type'),
-                  'bytes': len(http_response.content)}
+                  'bytes': len(http_response.content),
+                  'location_path': amazon_location_path(http_response.headers.get('location'))}
     else:
         try:
             fields = response_fields(source, http_response.json())

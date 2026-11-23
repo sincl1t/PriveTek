@@ -45,7 +45,7 @@ def test_unexpected_action_never_receives_email(action):
 
 @pytest.mark.parametrize('body,expected',[
     ('<div id="auth-password-missing-alert" hidden></div>',None),
-    ('<form><input name="password" type="password"></form>',True)])
+    ('<form method="post" action="/ap/signin"><input name="password" type="password"></form>',True)])
 def test_amazon_result(body,expected):
     out,requests=run(sources.amazon_email,[httpx.Response(200,text='<form method="post" action="/ap/signin"><input name="email"><input type="hidden" name="token" value="x"></form>'),httpx.Response(200,text=body)])
     assert requests[1].url.path=='/ap/signin'

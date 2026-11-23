@@ -96,5 +96,35 @@ class AmazonRoutingTests(unittest.TestCase):
             self.assertIsNone(result['exists'])
             self.assertIn('HTTP 429', result['reason'])
         self.assertIn('POST https://www.amazon.com/ax/claim', output.getvalue())
+        self.assertIn('"claimType": null, "countryCode": null, "email_has_plus": false, "email_digit_count": 11',
+                      output.getvalue())
         for value in ('12025550123', '12025550124', 'secret', 'sensitive HTML', 'openid.'):
             self.assertNotIn(value, output.getvalue())
+
+    def test_logs_form_shape_and_redirect_path_without_identifiers(self):
+        def respond(request):
+            locations = {
+                '/ax/claim': '/ax/claim/intent?arb=private-token&email=%2B12025550123',
+                '/ax/claim/intent': 'https://private.example/private-path?token=private-token',
+            }
+            return httpx.Response(302, headers={'Location': locations[request.url.path]})
+
+        async def run():
+            transport = SourceTransport(httpx.MockTransport(respond), amazon=True)
+            async with httpx.AsyncClient(transport=transport) as client:
+                await client.post('https://www.amazon.com/ax/claim', data={
+                    'claimType': 'phoneNumber', 'countryCode': 'NL',
+                    'email': '+12025550123', 'anti-csrftoken-a2z': 'private-token',
+                })
+                await client.get('https://www.amazon.com/ax/claim/intent?arb=private-token')
+
+        output = StringIO()
+        with redirect_stdout(output):
+            asyncio.run(run())
+        log = output.getvalue()
+        self.assertIn('"claimType": "phoneNumber", "countryCode": "NL", "email_has_plus": true, "email_digit_count": 11', log)
+        self.assertIn('HTTP 302', log)
+        self.assertIn('"location_path": "/ax/claim/intent"', log)
+        self.assertIn('"location_path": "/[redacted]"', log)
+        for value in ('12025550123', 'private-token', 'private.example', 'private-path', 'arb=', 'anti-csrftoken-a2z'):
+            self.assertNotIn(value, log)
