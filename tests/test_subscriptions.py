@@ -73,3 +73,13 @@ def test_local_csv_analyzer():
     if not node:pytest.skip('Node.js needed for local CSV checks')
     run=subprocess.run([node,str(Path(__file__).parent/'js/subscriptions.test.cjs')],capture_output=True,text=True,timeout=15)
     assert run.returncode==0,run.stdout+run.stderr
+
+
+def test_subscription_api_accepts_bounded_list_larger_than_auth_payload(settings,monkeypatch):
+    c=client();c.cookies.set(COOKIE,'x'*43)
+    monkeypatch.setattr(account_store,'session',lambda _:dict(id='owner',email='owner@example.com'))
+    monkeypatch.setattr(subs,'save',lambda owner,data:dict(data,revision=1))
+    data=sample();data['items']=[dict(data['items'][0],id=str(i)) for i in range(40)]
+    headers={'x-csrf-token':account_crypto.digest('csrf','x'*43)}
+    assert c.put('/api/account/subscriptions',json=data,headers=headers).status_code==200
+    assert c.put('/api/account/subscriptions',content='x'*65537,headers={**headers,'Content-Type':'application/json'}).status_code==413

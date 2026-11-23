@@ -36,4 +36,5 @@
  el('template').onclick=()=>{const text='date;merchant;amount;currency\n2026-08-10;Demo Service;-499.00;RUB\n2026-09-10;Demo Service;-499.00;RUB\n2026-10-10;Demo Service;-499.00;RUB\n';const url=URL.createObjectURL(new Blob(['\uFEFF'+text],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='subscription-template.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
  window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
  render();
+ if(!document.getElementById('dashboard').hidden && typeof userEmail==='string' && userEmail)load();
 })();
