@@ -1,13 +1,13 @@
 """Readable audit evidence: request → response → product result → actual PDF text."""
 import json
 import re
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 from helpers import trace_context, trace_lock
 
 SOURCES = {'LeakCheck', 'GitHub', 'GitLab', 'Amazon'}
 PHONE_QUERY = 'submitted'
-AMAZON_PATHS = {'/ap/signin', '/ap/signin/', '/ax/claim', '/ax/claim/intent', '/ap/register'}
+ROUTE_SEGMENT = re.compile(r'[A-Za-z][A-Za-z0-9_-]{0,31}(?:\.[A-Za-z]{1,8})?')
 LABELS = {'found': 'Найдены сведения', 'not_found': 'Находок в источнике нет',
           'possible': 'Возможная регистрация', 'unknown': 'Неопределённый результат',
           'unavailable': 'Проверка недоступна', 'skipped': 'Не проверялось',
@@ -59,14 +59,25 @@ def amazon_form(request):
     return details
 
 
-def amazon_location_path(location):
-    if location is None:
-        return None
+def amazon_location_path(path):
+    return '/'.join(
+        segment if not segment or (ROUTE_SEGMENT.fullmatch(segment) and sum(c.isdigit() for c in segment) <= 3)
+        else '[redacted]'
+        for segment in path.split('/')
+    )
+
+
+def amazon_redirect(location, request_url):
+    if not location:
+        return {'location_path': None}
     try:
-        path = urlsplit(location).path
+        target = urlsplit(urljoin(str(request_url), location))
     except ValueError:
-        return '/[redacted]'
-    return path if path in AMAZON_PATHS else '/[redacted]'
+        return {'location_path': '/[redacted]', 'location_origin': 'invalid'}
+    path = amazon_location_path(target.path)
+    origin = 'same' if target.scheme == 'https' and target.netloc in ('www.amazon.com', 'www.amazon.com:443') else 'other'
+    return {'location_path': path, 'location_origin': origin, 'location_host': target.hostname,
+            'location_scheme': target.scheme, 'location_has_query': bool(target.query)}
 
 
 def response_fields(source, payload):
@@ -95,11 +106,11 @@ def response_fields(source, payload):
     return fields or {'json_type': 'object', 'recognized_fields': []}
 
 
-def response(source, query, http_response, elapsed_ms):
+def response(source, query, http_response, elapsed_ms, *, request_url=None):
     if source == 'Amazon':
         fields = {'content_type': http_response.headers.get('content-type'),
                   'bytes': len(http_response.content),
-                  'location_path': amazon_location_path(http_response.headers.get('location'))}
+                  **amazon_redirect(http_response.headers.get('location'), request_url)}
     else:
         try:
             fields = response_fields(source, http_response.json())

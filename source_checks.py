@@ -54,6 +54,7 @@ async def guarded(source, operation, out, *, not_found_reason=None):
 
 
 AMAZON_SIGNIN_PATHS = ('/ap/signin', '/ap/signin/', '/ax/claim')
+AMAZON_CHALLENGE_PATH = '/ax/aaut/verify/ap/challenge'
 HIDDEN_STYLE = re.compile(r'(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:!important\s*)?(?:;|$)', re.I)
 
 
@@ -98,7 +99,9 @@ def amazon_result(soup, response_url):
     raise Unavailable('Amazon не вернул распознаваемый результат; наличие аккаунта неизвестно.')
 
 
-async def amazon_email(email, client, out):
+async def _amazon_lookup(identifier, client, out, *, phone_number=False):
+    redirect_paths = AMAZON_SIGNIN_PATHS + ('/ax/claim/intent',) if phone_number else AMAZON_SIGNIN_PATHS
+
     async def operation():
         response = await client.get('https://www.amazon.com/ap/signin', params={
             'openid.assoc_handle': 'usflex', 'openid.mode': 'checkid_setup',
@@ -119,18 +122,23 @@ async def amazon_email(email, client, out):
             raise Unavailable('Форма входа Amazon изменилась; отправка остановлена.')
         data = {i['name']: i.get('value', '') for i in form.select('input[name]')
                 if i.get('type', '').lower() == 'hidden'}
-        data['email'] = email
+        data['email'] = identifier
+        if phone_number:
+            data['claimType'] = 'phoneNumber'
         reply = await client.post(action, data=data, follow_redirects=False)
-        # The current identifier step redirects back to /ax/claim. Only follow
-        # same-origin login pages, and never redirect a POST or bypass CAPTCHA.
+        # Follow only recognized same-origin login steps, using GET after a redirect.
         for _ in range(3):
-            if reply.status_code not in (301, 302, 303):
+            if reply.status_code not in (301, 302, 303, 307, 308):
                 break
             location = reply.headers.get('location')
             target_url = urljoin(str(reply.url), location or '')
             redirect = urlparse(target_url)
-            if (not location or redirect.scheme != 'https' or redirect.netloc != 'www.amazon.com'
-                    or redirect.path not in AMAZON_SIGNIN_PATHS):
+            same_origin = redirect.scheme == 'https' and redirect.netloc == 'www.amazon.com'
+            if location and same_origin and redirect.path == AMAZON_CHALLENGE_PATH:
+                raise Unavailable('Amazon запросил дополнительную проверку; проверка не выполнена.')
+            if reply.status_code in (307, 308):
+                break
+            if not location or not same_origin or redirect.path not in redirect_paths:
                 raise Unavailable('Amazon перенаправил на неподдерживаемую страницу; проверка остановлена.')
             reply = await client.get(target_url, follow_redirects=False)
         return amazon_result(validate(reply), reply.url)
@@ -139,8 +147,12 @@ async def amazon_email(email, client, out):
                   not_found_reason='Amazon предложил создать аккаунт для указанного идентификатора.')
 
 
+async def amazon_email(email, client, out):
+    await _amazon_lookup(email, client, out)
+
+
 async def amazon_phone(phone, country_code, client, out):
-    await amazon_email(str(country_code)+str(phone), client, out)
+    await _amazon_lookup(f'+{country_code}{phone}', client, out, phone_number=True)
 
 
 async def instagram(email, client, out):

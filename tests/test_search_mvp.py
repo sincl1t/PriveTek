@@ -66,7 +66,7 @@ def test_phone_source_posts_country_code_and_number(action):
             requests.append(request)
             if request.method == 'GET':
                 return httpx.Response(200,text=f'<form method="post" action="{action}"><input name="email"><input type="hidden" name="token" value="abc"></form>')
-            assert b'email=12025550123' in request.content
+            assert request.content == b'token=abc&email=%2B12025550123&claimType=phoneNumber'
             return httpx.Response(200,text='<form method="post" action="/ap/signin"><input name="password" type="password"></form>')
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             out=[]
@@ -128,7 +128,14 @@ def test_username_report_contains_profile(tmp_path):
     assert 'личность не подтверждена' in text
 
 
-@pytest.mark.parametrize('location,expected_requests', [('/ax/claim?step=2',3),('https://example.com/collect',2),('/ap/register',2)])
+@pytest.mark.parametrize('location,expected_requests', [
+    ('/ax/claim?step=2', 3),
+    ('/ax/claim/intent', 3),
+    ('https://example.com/ax/claim/intent', 2),
+    ('http://www.amazon.com/ax/claim/intent', 2),
+    ('/ax/claim/intent/extra', 2),
+    ('/ap/register', 2),
+])
 def test_amazon_redirect_is_bounded_and_same_origin(location,expected_requests):
     async def run():
         requests=[]

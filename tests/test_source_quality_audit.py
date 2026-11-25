@@ -381,6 +381,18 @@ def test_profile_failure_does_not_hide_other_source(monkeypatch, tmp_path, unava
             "unavailable", "HTTP 429", id="rate-limit",
         ),
         pytest.param(
+            httpx.Response(302, headers={"Location": "/ax/aaut/verify/ap/challenge?session=synthetic"}),
+            "unavailable", "Amazon запросил дополнительную проверку", id="challenge-redirect",
+        ),
+        pytest.param(
+            httpx.Response(307, headers={"Location": "https://www.amazon.com/ax/aaut/verify/ap/challenge"}),
+            "unavailable", "Amazon запросил дополнительную проверку", id="challenge-redirect-preserve-method",
+        ),
+        pytest.param(
+            httpx.Response(302, headers={"Location": "https://example.invalid/ax/aaut/verify/ap/challenge"}),
+            "unavailable", "неподдерживаемую страницу", id="challenge-path-on-other-origin",
+        ),
+        pytest.param(
             httpx.Response(200, text='<html><main>Unexpected page</main></html>'),
             "unavailable", "распознаваемый результат", id="unexpected-html",
         ),
@@ -392,9 +404,16 @@ def test_amazon_phone_result_in_pdf(monkeypatch, tmp_path, response, expected_st
     def handler(request):
         requests.append(request)
         if request.method == "GET":
+            if request.url.path == "/ax/claim/intent":
+                assert request.url.params["arb"] == "synthetic"
+                return response
             return httpx.Response(
-                200, text='<form method="post" action="/ap/signin"><input name="email"></form>',
+                200, text='<form method="post" action="/ax/claim"><input name="email">'
+                          '<input type="hidden" name="claimType" value="">'
+                          '<input type="hidden" name="countryCode" value=""></form>',
             )
+        if expected_status == "not_found":
+            return httpx.Response(302, headers={"Location": "/ax/claim/intent?arb=synthetic"})
         if isinstance(response, httpx.ReadTimeout):
             raise response
         return response
@@ -407,10 +426,13 @@ def test_amazon_phone_result_in_pdf(monkeypatch, tmp_path, response, expected_st
     monkeypatch.setattr(osint.httpx, "AsyncClient", mock_client)
     results = osint.search(phone="+1 (202) 555-0123")
 
-    assert [(request.method, request.url.host) for request in requests] == [
-        ("GET", "www.amazon.com"), ("POST", "www.amazon.com"),
-    ]
-    assert requests[1].content == b"email=12025550123"
+    expected_requests = [("GET", "/ap/signin"), ("POST", "/ax/claim")]
+    if expected_status == "not_found":
+        expected_requests.append(("GET", "/ax/claim/intent"))
+        assert requests[-1].content == b""
+    assert [(request.method, request.url.path) for request in requests] == expected_requests
+    assert all(request.url.host == "www.amazon.com" for request in requests)
+    assert requests[1].content == b"claimType=phoneNumber&countryCode=&email=%2B12025550123"
     check, = [row for row in results["checks"] if (row["source"], row["kind"]) == ("Amazon", "phone")]
     assert check["status"] == expected_status
     assert reason_fragment in check["reason"]

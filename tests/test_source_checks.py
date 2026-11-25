@@ -36,7 +36,7 @@ def test_captcha_stops_before_submission():
     assert len(requests)==1
 
 
-@pytest.mark.parametrize('action',['https://evil.example/ap/signin','/ap/register','http://www.amazon.com/ap/signin'])
+@pytest.mark.parametrize('action',['https://evil.example/ap/signin','/ap/register','http://www.amazon.com/ap/signin','/ax/claim/intent'])
 def test_unexpected_action_never_receives_email(action):
     out,requests=run(sources.amazon_email,[httpx.Response(200,text=f'<form method="post" action="{action}"><input name="email"></form>')])
     assert out[0]['exists'] is None
@@ -49,7 +49,19 @@ def test_unexpected_action_never_receives_email(action):
 def test_amazon_result(body,expected):
     out,requests=run(sources.amazon_email,[httpx.Response(200,text='<form method="post" action="/ap/signin"><input name="email"><input type="hidden" name="token" value="x"></form>'),httpx.Response(200,text=body)])
     assert requests[1].url.path=='/ap/signin'
+    assert requests[1].content == b'token=x&email=test%40example.invalid'
     assert out[0]['exists'] is expected
+
+
+def test_amazon_email_does_not_follow_phone_intent():
+    out, requests = run(sources.amazon_email, [
+        httpx.Response(200, text='<form method="post" action="/ax/claim"><input name="email">'
+                                 '<input type="hidden" name="claimType" value=""></form>'),
+        httpx.Response(302, headers={'Location': '/ax/claim/intent'}),
+    ])
+    assert [request.method for request in requests] == ['GET', 'POST']
+    assert requests[1].content == b'claimType=&email=test%40example.invalid'
+    assert out[0]['exists'] is None
 
 
 @pytest.mark.parametrize('payload,expected',[

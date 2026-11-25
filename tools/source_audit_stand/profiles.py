@@ -69,7 +69,7 @@ class SourceTransport(httpx.AsyncBaseTransport):
         except httpx.HTTPError as error:
             audit_log.failure(source, query, error)
             raise
-        audit_log.response(source, query, response, round((time.monotonic() - started) * 1000))
+        audit_log.response(source, query, response, round((time.monotonic() - started) * 1000), request_url=url)
         if self.amazon and self.amazon_html_dir is not None:
             self.amazon_response_count += 1
             try:
