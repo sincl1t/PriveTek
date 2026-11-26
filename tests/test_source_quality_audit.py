@@ -339,7 +339,7 @@ def test_profile_failure_does_not_hide_other_source(monkeypatch, tmp_path, unava
         pytest.param(
             httpx.Response(200, text='<form method="post" action="/ap/signin">'
                                      '<input name="password" type="password"></form>'),
-            "possible", "Косвенный признак", id="password-form",
+            "unavailable", "распознаваемый результат", id="ambiguous-password-form",
         ),
         pytest.param(
             httpx.Response(200, text='<form id="ap_login_form" method="post" action="/ax/claim">'
@@ -353,6 +353,12 @@ def test_profile_failure_does_not_hide_other_source(monkeypatch, tmp_path, unava
             httpx.Response(200, text='<form method="post" action="/ap/signin">'
                                      '<div style="display: none"><input name="password" type="password"></div></form>'),
             "unavailable", "распознаваемый результат", id="hidden-password-container",
+        ),
+        pytest.param(
+            httpx.Response(200, text='<style>.login-placeholder { display: none }</style>'
+                                     '<form method="post" action="/ap/signin">'
+                                     '<div class="login-placeholder"><input name="password" type="password"></div></form>'),
+            "unavailable", "распознаваемый результат", id="css-hidden-password-container",
         ),
         pytest.param(
             httpx.Response(200, text='<form method="post" action="/ax/claim">'
@@ -446,20 +452,11 @@ def test_amazon_phone_result_in_pdf(monkeypatch, tmp_path, response, expected_st
     )[0]
     assert reason_fragment in section
     assert ("Amazon: Находок в источнике нет" in section) == (expected_status == "not_found")
-    findings = results["identity_resolution"]["findings"]
-    if expected_status == "possible":
-        finding, = findings
-        assert finding["source"] == "Amazon"
-        assert finding["decision"] == "unreviewed"
-        assert finding["evidence"] == "indirect_signal"
-        assert finding["identifier_id"] == "identifier-phone"
-        assert "Находки и возможные совпадения Amazon: Возможная регистрация" in section
-        assert "Косвенный признак." in pdf_text
-    elif expected_status == "not_found":
-        assert findings == []
+    assert "Amazon: Возможная регистрация" not in section
+    assert results["identity_resolution"]["findings"] == []
+    if expected_status == "not_found":
         assert results["phone_registrations"] == []
         assert "Проверки без находок Amazon: Находок в источнике нет" in section
     else:
-        assert findings == []
         assert results["phone_registrations"] is None
         assert "Ограничения проверки Amazon: Проверка недоступна" in section

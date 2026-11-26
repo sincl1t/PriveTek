@@ -45,12 +45,41 @@ def test_unexpected_action_never_receives_email(action):
 
 @pytest.mark.parametrize('body,expected',[
     ('<div id="auth-password-missing-alert" hidden></div>',None),
-    ('<form method="post" action="/ap/signin"><input name="password" type="password"></form>',True)])
+    ('<form method="post" action="/ap/signin"><input name="password" type="password"></form>',None),
+    ('<style>.login-placeholder { display: none }</style><form method="post" action="/ap/signin">'
+     '<input class="login-placeholder" name="password" type="password"></form>',None),
+    ("<h1>Looks like you're new to Amazon</h1><button>Proceed to create an account</button>",False)])
 def test_amazon_result(body,expected):
     out,requests=run(sources.amazon_email,[httpx.Response(200,text='<form method="post" action="/ap/signin"><input name="email"><input type="hidden" name="token" value="x"></form>'),httpx.Response(200,text=body)])
     assert requests[1].url.path=='/ap/signin'
     assert requests[1].content == b'token=x&email=test%40example.invalid'
     assert out[0]['exists'] is expected
+
+
+@pytest.mark.parametrize('container_class,styles,phone,expected', [
+    ('a-section', '', False, 'possible'),
+    ('unknown-layout', '', False, 'unavailable'),
+    ('a-section', '<style>.a-section { display: none }</style>', False, 'unavailable'),
+    ('a-section', '', True, 'unavailable'),
+])
+def test_amazon_password_step_requires_confirmed_email_markup(container_class, styles, phone, expected):
+    password_step = (f'{styles}<form name="signIn" method="post" action="/ap/signin">'
+                     '<input id="ap_email" name="email" type="hidden">'
+                     '<input id="ap-credential-autofill-hint" name="email" type="text" class="a-input-text hide">'
+                     f'<div class="{container_class}"><label for="ap_password">Password</label>'
+                     '<input id="ap_password" name="password" type="password" autocomplete="current-password">'
+                     '<input id="signInSubmit" type="submit"></div></form>')
+
+    async def phone_lookup(_email, client, out):
+        await sources.amazon_phone('2025550123', '1', client, out)
+
+    out, _ = run(phone_lookup if phone else sources.amazon_email, [
+        httpx.Response(200, text='<form method="post" action="/ap/signin"><input name="email"></form>'),
+        httpx.Response(200, text=password_step),
+    ])
+    checks = []
+    osint.collect(out, [], checks, 'phone' if phone else 'email')
+    assert checks[0]['status'] == expected
 
 
 def test_amazon_email_does_not_follow_phone_intent():
