@@ -7,7 +7,9 @@ from helpers import trace_context, trace_lock
 
 SOURCES = {'LeakCheck', 'GitHub', 'GitLab', 'Amazon'}
 PHONE_QUERY = 'submitted'
-ROUTE_SEGMENT = re.compile(r'[A-Za-z][A-Za-z0-9_-]{0,31}(?:\.[A-Za-z]{1,8})?')
+AMAZON_LOG_ROUTES = (
+    '/ap/signin', '/ap/register', '/ax/claim', '/ax/claim/intent', '/ax/aaut/verify/ap/challenge',
+)
 LABELS = {'found': 'Найдены сведения', 'not_found': 'Находок в источнике нет',
           'possible': 'Возможная регистрация', 'unknown': 'Неопределённый результат',
           'unavailable': 'Проверка недоступна', 'skipped': 'Не проверялось',
@@ -60,11 +62,14 @@ def amazon_form(request):
 
 
 def amazon_location_path(path):
-    return '/'.join(
-        segment if not segment or (ROUTE_SEGMENT.fullmatch(segment) and sum(c.isdigit() for c in segment) <= 3)
-        else '[redacted]'
-        for segment in path.split('/')
+    route = max(
+        (route for route in AMAZON_LOG_ROUTES if path == route or path.startswith(route + '/')),
+        key=len, default='',
     )
+    if not route:
+        return path if path in ('', '/') else '/[redacted]'
+    suffix = path[len(route):]
+    return route + '/'.join('[redacted]' if segment else '' for segment in suffix.split('/'))
 
 
 def amazon_redirect(location, request_url):

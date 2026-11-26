@@ -106,7 +106,8 @@ class AmazonRoutingTests(unittest.TestCase):
             locations = {
                 '/ax/claim': '/ax/claim/intent?arb=private-token&email=%2B12025550123',
                 '/ax/claim/intent': 'https://private.example/private-path?token=private-token',
-                '/ap/signin': '/ax/claim/intent/12025550123/?token=private-token',
+                '/ap/signin': '/ax/claim/intent/12025550123/kqvmztrp/?token=private-token',
+                '/ax/claim/kqvmztrp': '/ax/aaut/verify/ap/challenge?session=private-token',
             }
             return httpx.Response(302, headers={'Location': locations[request.url.path]})
 
@@ -119,6 +120,7 @@ class AmazonRoutingTests(unittest.TestCase):
                 })
                 await client.get('https://www.amazon.com/ax/claim/intent?arb=private-token')
                 await client.get('https://www.amazon.com/ap/signin')
+                await client.get('https://www.amazon.com/ax/claim/kqvmztrp')
 
         output = StringIO()
         with redirect_stdout(output):
@@ -127,7 +129,9 @@ class AmazonRoutingTests(unittest.TestCase):
         self.assertIn('"claimType": "phoneNumber", "countryCode": "NL", "email_has_plus": true, "email_digit_count": 11', log)
         self.assertIn('HTTP 302', log)
         self.assertIn('"location_path": "/ax/claim/intent", "location_origin": "same"', log)
-        self.assertIn('"location_path": "/private-path", "location_origin": "other", "location_host": "private.example"', log)
-        self.assertIn('"location_path": "/ax/claim/intent/[redacted]/"', log)
-        for value in ('12025550123', 'private-token', 'arb=', 'anti-csrftoken-a2z'):
+        self.assertIn('"location_path": "/[redacted]", "location_origin": "other", "location_host": "private.example"', log)
+        self.assertIn('"location_path": "/ax/claim/intent/[redacted]/[redacted]/"', log)
+        self.assertIn('GET https://www.amazon.com/ax/claim/[redacted]', log)
+        self.assertIn('"location_path": "/ax/aaut/verify/ap/challenge"', log)
+        for value in ('12025550123', 'kqvmztrp', 'private-path', 'private-token', 'arb=', 'anti-csrftoken-a2z'):
             self.assertNotIn(value, log)
