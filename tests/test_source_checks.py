@@ -187,3 +187,27 @@ def test_avatar_is_not_reported_as_breach(tmp_path):
     text = ''.join(p.extract_text() for p in PdfReader(pdf_gen.create_report(data, tmp_path)).pages)
     assert 'Публичные аватары по email' in text
     assert 'Gravatar: Найдены сведения' in text
+
+
+@pytest.mark.parametrize('phone', [False, True])
+@pytest.mark.parametrize('wrapper', [
+    '<style>.inactive-step {{display:none}}</style><div class="inactive-step">{}</div>',
+    '<div class="unknown-layout">{}</div>',
+    '<div inert>{}</div>',
+    '<div style="opacity:0">{}</div>',
+    '<div>{}<style>h1 {{display:none}}</style></div>',
+])
+def test_amazon_uncertain_registration_screen_is_not_absence(phone, wrapper):
+    from bs4 import BeautifulSoup
+    screen = "<h1>Looks like you're new to Amazon</h1><button>Proceed to create an account</button>"
+    with pytest.raises(sources.Unavailable):
+        sources.amazon_result(BeautifulSoup(wrapper.format(screen), 'html.parser'),
+                              'https://www.amazon.com/ax/claim', phone_number=phone)
+
+
+@pytest.mark.parametrize('phone', [False, True])
+def test_amazon_explicit_registration_step_is_still_not_found(phone):
+    from bs4 import BeautifulSoup
+    screen = "<div class='a-section'><h1>Looks like you're new to Amazon</h1><button>Proceed to create an account</button></div>"
+    assert sources.amazon_result(BeautifulSoup(screen, 'html.parser'),
+                                 'https://www.amazon.com/ax/claim', phone_number=phone) is False

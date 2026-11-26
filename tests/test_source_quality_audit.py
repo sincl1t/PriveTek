@@ -379,6 +379,12 @@ def test_profile_failure_does_not_hide_other_source(monkeypatch, tmp_path, unava
             "unavailable", "распознаваемый результат", id="hidden-new-account-screen",
         ),
         pytest.param(
+            httpx.Response(200, text="<style>.inactive-step {display:none}</style>"
+                                     "<div class='inactive-step'><h1>Looks like you're new to Amazon</h1>"
+                                     "<button>Proceed to create an account</button></div>"),
+            "unavailable", "распознаваемый результат", id="css-hidden-new-account-screen",
+        ),
+        pytest.param(
             httpx.ReadTimeout("Synthetic read timeout"),
             "unavailable", "Ошибка соединения", id="timeout",
         ),

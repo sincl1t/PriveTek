@@ -76,6 +76,15 @@ def amazon_visible(element):
     )
 
 
+def amazon_confirmed_visible(element):
+    """Unknown CSS or inactive ancestors are not evidence of an active UI step."""
+    return amazon_visible(element) and not any(
+        node.has_attr('disabled') or node.has_attr('inert') or node.get('style')
+        or not AMAZON_EMAIL_PASSWORD_CLASSES.issuperset(node.get('class', ()))
+        for node in (element, *element.parents)
+    )
+
+
 def amazon_email_password_step(soup, response_url):
     forms = soup.select('form[name="signIn"][method="post"]')
     # The reference step has no inline stylesheet. The HTML parser cannot
@@ -101,11 +110,7 @@ def amazon_email_password_step(soup, response_url):
         if len(controls) != 1:
             return False
         control = controls[0]
-        if not amazon_visible(control) or any(
-            node.has_attr('disabled') or node.has_attr('inert') or node.get('style')
-            or not AMAZON_EMAIL_PASSWORD_CLASSES.issuperset(node.get('class', ()))
-            for node in (control, *control.parents)
-        ):
+        if not amazon_confirmed_visible(control):
             return False
     return True
 
@@ -115,11 +120,11 @@ def amazon_result(soup, response_url, *, phone_number):
     if invalid_phone is not None and amazon_visible(invalid_phone):
         raise Unavailable('Amazon отклонил номер телефона; проверка не выполнена.')
 
-    new_account = any(
-        amazon_visible(node) and ' '.join(node.stripped_strings).replace('’', "'").casefold() == "looks like you're new to amazon"
+    new_account = soup.select_one('style') is None and any(
+        amazon_confirmed_visible(node) and ' '.join(node.stripped_strings).replace('’', "'").casefold() == "looks like you're new to amazon"
         for node in soup.select('h1, h2')
     ) and any(
-        amazon_visible(node) and ' '.join((node.get('value') or node.get_text(' ', strip=True)).split()).casefold()
+        amazon_confirmed_visible(node) and ' '.join((node.get('value') or node.get_text(' ', strip=True)).split()).casefold()
         == 'proceed to create an account'
         for node in soup.select('button, input[type="submit"]')
     )
