@@ -51,6 +51,21 @@ def register(client, email, password):
     expect(client.post("/api/account/auth/verify", json={"challenge_id": challenge, "code": code}), 200)
 
 
+def verify_chat_github(client, csrf, username, expected_status):
+    response = client.post('/api/account/profile-search', json={'username': username, 'consent': True}, headers=csrf)
+    results = response.json()['results'] if response.status_code == 200 else []
+    github = [row for row in results if row['site'] == 'GitHub']
+    result = github[0] if len(github) == 1 else {}
+    expected_url = 'https://github.com/' + username.lower() if expected_status == 'found' else None
+    observation = dict(username=username, http_status=response.status_code,
+                       status=result.get('status'), url=result.get('url'))
+    checks = {
+        'github_chat_status': len(github) == 1 and result.get('status') == expected_status,
+        'github_chat_url': len(github) == 1 and 'url' in result and result['url'] == expected_url,
+    }
+    return observation, checks
+
+
 def verify_scenario(client, password, scenario, email, usernames, expected_leakcheck, expected_profiles):
     client.cookies.clear()
     expect(client.post('/api/account/auth/login', json={'email': email, 'password': password}), 200)
@@ -105,8 +120,11 @@ def verify_scenario(client, password, scenario, email, usernames, expected_leakc
     if scenario == 'absent':
         checks['no_profile_findings'] = not [r for r in snapshot['findings'] if r['kind'] == 'username']
         checks['no_found_profile_pdf_labels'] = all(f'{name}: Найдены сведения' not in section for name in PROFILE_SOURCES)
+    chat_username = usernames[0]
+    chat, chat_checks = verify_chat_github(client, csrf, chat_username, expected_profiles['GitHub', chat_username])
+    checks.update(chat_checks)
     return dict(scenario=scenario, mode='live', leakcheck_status=leakcheck['status'],
-               profiles=profiles, checks=checks, passed=all(checks.values()),
+               profiles=profiles, github_chat=chat, checks=checks, passed=all(checks.values()),
                pdf=pdf_path.name, pdf_pages=len(report.pages))
 
 
@@ -163,6 +181,10 @@ def format_verification_summary(rows, scenarios):
             statuses = ', '.join(f"{profile['query_username']} = {profile['status']}"
                                  for profile in row['profiles'] if profile['source'] == source)
             output.append(f"  {source}: {statuses or 'нет результата'}")
+        chat = row['github_chat']
+        chat_result = chat['status'] or 'нет результата'
+        chat_link = f" · {chat['url']}" if chat['url'] else ''
+        output.append(f"  GitHub (чат): {chat['username']} = {chat_result} · API кабинета HTTP {chat['http_status']}{chat_link}")
         output.append(f"  PDF: {row['pdf']} (страниц: {row['pdf_pages']})")
         failed_checks = [name for name, matched in row['checks'].items() if not matched]
         if failed_checks:
@@ -347,8 +369,9 @@ def serve(origin, listener, cert_path, key_path, verify):
                     client.cookies.clear()
                     Path('/tmp/source-audit-ready').write_text('ready')
                     print(f'\nСТЕНД АУДИТА ИСТОЧНИКОВ ГОТОВ: {origin}/account/login', flush=True)
-                    live_sources = ('LeakCheck, GitHub, GitLab' if verify else
-                                    'LeakCheck, GitHub и GitLab в отчёте, GitHub в чате, Amazon по телефону')
+                    live_sources = 'LeakCheck, GitHub и GitLab в отчёте, GitHub в чате'
+                    if not verify:
+                        live_sources += ', Amazon по телефону'
                     print(f'Живые источники: {live_sources}.', flush=True)
                     print('Регистрация не нужна: два тестовых аккаунта уже подготовлены.', flush=True)
                     if verify:
@@ -389,7 +412,7 @@ def main():
                 ACCOUNT_SECRET=secrets.token_hex(32), ACCOUNT_REPORT_KEY=Fernet.generate_key().decode(),
                 MAIL_PROVIDER="brevo", MAIL_FROM="sender@example.com", BREVO_API_KEY="fixture-only",
                 AI_SUMMARY_ENABLED="false", MONITOR_ENABLED="false", HIBP_API_KEY="", RENDER="false",
-                PROFILE_SEARCH_ENABLED="false" if options.verify else "true",
+                PROFILE_SEARCH_ENABLED="true",
             )
             if not serve(origin, listener, cert_path, key_path, options.verify):
                 raise SystemExit(1)

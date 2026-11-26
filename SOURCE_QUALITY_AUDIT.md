@@ -29,7 +29,7 @@ docker compose -f tools/source_audit_stand/compose.yaml up --build
 
 PDF ручной заявки доступен для скачивания в кабинете. Автоматический прогон сохраняет скачанные PDF и сводку проверок в `tools/source_audit_stand/artifacts/`. При ручной проверке Amazon стенд по умолчанию сохраняет HTML-снимки ответов в `tools/source_audit_stand/artifacts/amazon-html/<job>/`, где `<job>` — идентификатор заявки из журнала. По снимкам можно сравнить формы до и после отправки номера. Из них удаляются значения полей, параметры URL и скрипты.
 
-**Автоматический тест живых запросов.** Флаг `--verify` запускает три заявки через API кабинета и сверяет статусы GitHub, GitLab и LeakCheck с данными карточки и PDF. Автопрогон передаёт синтетический номер для валидации заявки, а при поиске пропускает Amazon по телефону со статусом `skipped`. Сводка и PDF сохраняются в `tools/source_audit_stand/artifacts/`.
+**Автоматический тест живых запросов.** Флаг `--verify` запускает три заявки через API кабинета и сверяет статусы GitHub, GitLab и LeakCheck с данными карточки и PDF. В каждом сценарии стенд также проверяет GitHub через API быстрого поиска в чате. Автопрогон передаёт синтетический номер для валидации заявки, а при поиске пропускает Amazon по телефону со статусом `skipped`. Сводка и PDF сохраняются в `tools/source_audit_stand/artifacts/`.
 
 ```sh
 docker compose -p privetek-source-audit-verify -f tools/source_audit_stand/compose.yaml -f tools/source_audit_stand/compose.verify.yaml up --build --attach app --no-log-prefix --exit-code-from app
@@ -65,6 +65,14 @@ Amazon использует одну стартовую форму «Sign in or 
 
 Отдельно для Amazon считаю, что среди целевой аудитории данный источник менее значимый и его приоритет стоит пересмотреть в пользу более распространенных площадок для RU-сегмента
 
-**Охват GitHub**
+## Охват GitHub
 
-Имитации и контейнерный прогон проверяют отчётный адаптер `public_sources.check_profile`, который обращается к GitHub Users API. В репозитории также есть отдельная функция `source_checks.github_username`. Рабочий чат использует адаптер публичной HTML-страницы в `profile_search.py`. Проверка чат-адаптера остаётся отдельной задачей.
+В заявке на отчёт `public_sources.check_profile` обращается к GitHub Users API. Быстрый поиск в чате идёт через `POST /api/account/profile-search` и адаптер публичной HTML-страницы в `profile_search.py`. В каждом сценарии `--verify` сверяет статус и ссылку GitHub в ответе чата. При ручной проверке те же результаты видны в блоке «Быстрый поиск профилей по username». [Инструкция стенда](tools/source_audit_stand/README.md#ручная-проверка-github-в-чате)
+
+**Результат проверки работы поиска GitHub через чат**
+
+| Сценарий | Контрольный username | Статус GitHub в чате | Ссылка в ответе |
+| --- | --- | --- | --- |
+| `known` | `octocat` | `found` | `https://github.com/octocat` |
+| `absent` | `pvtkz8q4n2x7r9` | `not_found` | `null` |
+| `case` | `Octocat` | `found` | `https://github.com/octocat` |
