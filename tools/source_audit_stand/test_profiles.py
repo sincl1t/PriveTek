@@ -69,6 +69,7 @@ class ProfileRoutingTests(unittest.TestCase):
         request, = requests
         self.assertEqual(str(request.url), 'https://github.com/Octocat')
         self.assertEqual(request.headers['Accept'], 'text/html')
+        self.assertIn('GET https://github.com/[redacted]', log.getvalue())
         self.assertIn('"content_type": "text/html"', log.getvalue())
         self.assertNotIn('json_error', log.getvalue())
         for url in ('https://github.com/octocat?tab=repositories', 'https://github.com/octocat/repo'):
