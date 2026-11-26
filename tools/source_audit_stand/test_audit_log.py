@@ -49,11 +49,32 @@ class AuditLogTests(unittest.TestCase):
             audit_log.failure('GitHub', 'AuditUser', httpx.ReadTimeout('never-log-error-details'))
             audit_log.response('GitLab', 'audit-user', httpx.Response(200, text='<html>never-log-body</html>'), 15)
         log = output.getvalue()
-        for value in ('username="AuditUser"', 'GET https://api.github.com/users/AuditUser',
+        for value in ('username="AuditUser"', 'GET https://api.github.com/users/[redacted]',
                       'HTTP 429', 'Too many requests', '123 мс', 'ReadTimeout', 'не является корректным JSON'):
             self.assertIn(value, log)
         self.assertNotIn('never-log-error-details', log)
         self.assertNotIn('never-log-body', log)
+
+    def test_request_and_redirect_urls_use_shared_masking(self):
+        new_url = 'https://user:credential@example.invalid/lookup/alphatoken?key=querysecret#fragmentsecret'
+        output = StringIO()
+        with redirect_stdout(output):
+            audit_log.request('GitLab', 'control', 'GET', 'https://gitlab.com/api/v4/users?username=privatehandle')
+            audit_log.request('LeakCheck', 'control', 'GET', 'https://leakcheck.io/api/public?check=controlhash')
+            audit_log.request('New source', 'control', 'GET', new_url)
+            audit_log.response('New source', 'control', httpx.Response(302, headers={
+                'Location': '/next/redirecttoken?key=redirectsecret',
+            }), 5, request_url='https://example.invalid/lookup/alphatoken')
+        log = output.getvalue()
+        self.assertIn('GET https://gitlab.com/api/v4/users', log)
+        self.assertIn('GET https://leakcheck.io/api/public', log)
+        self.assertIn('GET https://example.invalid/[redacted]', log)
+        self.assertIn('"location_path": "/[redacted]", "location_origin": "same"', log)
+        self.assertEqual(trace_context.audit_requests[('New source', 'control')],
+                         'GET https://example.invalid/[redacted]')
+        for value in ('credential', 'alphatoken', 'querysecret', 'fragmentsecret', 'privatehandle',
+                      'controlhash', 'redirecttoken', 'redirectsecret'):
+            self.assertNotIn(value, log)
 
     def test_unavailable_metadata_remains_null_in_processing_log(self):
         output = StringIO()

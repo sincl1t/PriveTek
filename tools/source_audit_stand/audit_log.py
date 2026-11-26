@@ -7,9 +7,13 @@ from helpers import trace_context, trace_lock
 
 SOURCES = {'LeakCheck', 'GitHub', 'GitLab', 'Amazon'}
 PHONE_QUERY = 'submitted'
-AMAZON_LOG_ROUTES = (
-    '/ap/signin', '/ap/register', '/ax/claim', '/ax/claim/intent', '/ax/aaut/verify/ap/challenge',
-)
+LOG_ROUTES_BY_HOST = {
+    'api.github.com': ('/users',),
+    'gitlab.com': ('/api/v4/users',),
+    'leakcheck.io': ('/api/public',),
+    'www.amazon.com': ('/ap/signin', '/ap/register', '/ax/claim', '/ax/claim/intent', '/ax/aaut/verify/ap/challenge'),
+}
+DEFAULT_PORTS = {'http': 80, 'https': 443}
 LABELS = {'found': 'Найдены сведения', 'not_found': 'Находок в источнике нет',
           'possible': 'Возможная регистрация', 'unknown': 'Неопределённый результат',
           'unavailable': 'Проверка недоступна', 'skipped': 'Не проверялось',
@@ -37,10 +41,11 @@ def begin(email, usernames, *, phone_supplied=False):
 
 
 def request(source, query, method, url, mode='live', details=None):
+    safe_url = mask_request_url(url)
     requests = getattr(trace_context, 'audit_requests', None)
     if requests is not None:
-        requests[(source, query)] = f'{method} {url}'
-    summary = f'{method} {url} | mode={mode}'
+        requests[(source, query)] = f'{method} {safe_url}'
+    summary = f'{method} {safe_url} | mode={mode}'
     if details is not None:
         summary += f' | {compact(details)}'
     event(source, query, 'ЗАПРОС', summary)
@@ -61,9 +66,9 @@ def amazon_form(request):
     return details
 
 
-def amazon_location_path(path):
+def mask_url_path(path, known_routes=()):
     route = max(
-        (route for route in AMAZON_LOG_ROUTES if path == route or path.startswith(route + '/')),
+        (route for route in known_routes if path == route or path.startswith(route + '/')),
         key=len, default='',
     )
     if not route:
@@ -72,15 +77,29 @@ def amazon_location_path(path):
     return route + '/'.join('[redacted]' if segment else '' for segment in suffix.split('/'))
 
 
-def amazon_redirect(location, request_url):
+def mask_request_url(url):
+    try:
+        target = urlsplit(str(url))
+    except ValueError:
+        return '[redacted]'
+    if target.scheme not in DEFAULT_PORTS or not target.hostname:
+        return '[redacted]'
+    path = mask_url_path(target.path, LOG_ROUTES_BY_HOST.get(target.hostname, ()))
+    return f'{target.scheme}://{target.hostname}{path}'
+
+
+def redirect_fields(location, request_url):
     if not location:
         return {'location_path': None}
     try:
         target = urlsplit(urljoin(str(request_url), location))
+        request = urlsplit(str(request_url))
+        target_origin = (target.scheme, target.hostname, target.port or DEFAULT_PORTS.get(target.scheme))
+        request_origin = (request.scheme, request.hostname, request.port or DEFAULT_PORTS.get(request.scheme))
     except ValueError:
         return {'location_path': '/[redacted]', 'location_origin': 'invalid'}
-    path = amazon_location_path(target.path)
-    origin = 'same' if target.scheme == 'https' and target.netloc in ('www.amazon.com', 'www.amazon.com:443') else 'other'
+    path = mask_url_path(target.path, LOG_ROUTES_BY_HOST.get(target.hostname, ()))
+    origin = 'same' if target_origin == request_origin and not (target.username or target.password) else 'other'
     return {'location_path': path, 'location_origin': origin, 'location_host': target.hostname,
             'location_scheme': target.scheme, 'location_has_query': bool(target.query)}
 
@@ -114,8 +133,7 @@ def response_fields(source, payload):
 def response(source, query, http_response, elapsed_ms, *, request_url=None):
     if source == 'Amazon':
         fields = {'content_type': http_response.headers.get('content-type'),
-                  'bytes': len(http_response.content),
-                  **amazon_redirect(http_response.headers.get('location'), request_url)}
+                  'bytes': len(http_response.content)}
     else:
         try:
             fields = response_fields(source, http_response.json())
@@ -123,6 +141,9 @@ def response(source, query, http_response, elapsed_ms, *, request_url=None):
             fields = {'json_error': 'Ответ не является корректным JSON',
                       'content_type': http_response.headers.get('content-type'),
                       'bytes': len(http_response.content)}
+    location = http_response.headers.get('location')
+    if source == 'Amazon' or location:
+        fields.update(redirect_fields(location, request_url))
     observation = {'http_status': http_response.status_code, 'elapsed_ms': elapsed_ms, 'details': fields}
     observations = getattr(trace_context, 'audit_responses', None)
     if observations is not None:

@@ -291,7 +291,7 @@ def serve(origin, listener, cert_path, key_path, verify):
             except httpx.HTTPError as error:
                 audit_log.failure('LeakCheck', email, error)
                 raise
-            audit_log.response('LeakCheck', email, response, round((time.monotonic() - started) * 1000))
+            audit_log.response('LeakCheck', email, response, round((time.monotonic() - started) * 1000), request_url=url)
             return response
 
         def send_mail(url, **kwargs):

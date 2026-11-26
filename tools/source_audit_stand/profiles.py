@@ -49,8 +49,6 @@ class SourceTransport(httpx.AsyncBaseTransport):
                     or url.username or url.password):
                 raise httpx.RequestError('Only the Amazon origin is enabled during its phone check', request=request)
             source, query = 'Amazon', audit_log.PHONE_QUERY
-            path = audit_log.amazon_location_path(url.path)
-            logged_url = f'https://www.amazon.com{path}'
             media_type = request.headers.get('content-type', '').split(';', 1)[0].strip().lower()
             if request.method == 'POST' and media_type == 'application/x-www-form-urlencoded':
                 await request.aread()
@@ -60,8 +58,7 @@ class SourceTransport(httpx.AsyncBaseTransport):
             if source is None:
                 raise httpx.RequestError('Only GitHub/GitLab user API endpoints are enabled', request=request)
             query = url.path.rsplit('/', 1)[1] if source == 'GitHub' else url.params['username']
-            logged_url = str(url)
-        audit_log.request(source, query, request.method, logged_url, mode=self.mode, details=details)
+        audit_log.request(source, query, request.method, url, mode=self.mode, details=details)
         started = time.monotonic()
         try:
             response = await self.live.handle_async_request(request)
