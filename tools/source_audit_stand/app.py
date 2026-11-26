@@ -192,6 +192,7 @@ def serve(origin, listener, cert_path, key_path, verify):
     import server
     import osint
     import account_store
+    import profile_search
 
     original_search = osint.search
     original_run_checks = osint.run_checks
@@ -200,6 +201,7 @@ def serve(origin, listener, cert_path, key_path, verify):
     original_save = account_store.save_report
     original_reserve = server.guard.reserve
     original_profile_check = public_sources.check_profile
+    original_chat_search = profile_search.search_sources
 
     stages = {
         'accepted': 'Заявка принята', 'searching': 'Начат поиск',
@@ -229,6 +231,16 @@ def serve(origin, listener, cert_path, key_path, verify):
 
     async def no_discovery(username=None, fixtures=False):
         return [skipped(source) for source in osint.discovery.SOURCES]
+
+    async def chat_search(username):
+        trace_context.chat_active = True
+        try:
+            rows = await original_chat_search(username)
+            github = next(row for row in rows if row['site'] == 'GitHub')
+            audit_log.event(audit_log.GITHUB_CHAT, username, 'ОБРАБОТКА ПРИЛОЖЕНИЕМ', audit_log.compact(github))
+            return rows
+        finally:
+            trace_context.chat_active = False
 
     def create_pdf(data, *args, **kwargs):
         trace('Сборка PDF', checks_count=len(data.get('checks', [])))
@@ -275,7 +287,8 @@ def serve(origin, listener, cert_path, key_path, verify):
         html_dir = None
         if amazon and os.getenv('STAND_CAPTURE_AMAZON_HTML', '1') == '1':
             html_dir = STAND / 'amazon-html' / trace_context.job_id
-        return async_client(transport=SourceTransport(amazon=amazon, amazon_html_dir=html_dir), **kwargs)
+        return async_client(transport=SourceTransport(amazon=amazon, amazon_html_dir=html_dir,
+                                                      chat=getattr(trace_context, 'chat_active', False)), **kwargs)
 
     with httpx.Client(trust_env=False) as live, httpx.Client(transport=transport) as mail:
         def lookup_http(url, **kwargs):
@@ -301,6 +314,7 @@ def serve(origin, listener, cert_path, key_path, verify):
 
         with patch.object(osint, "run_checks", stand_checks), \
                 patch.object(osint, "search", partial(audit_search, original_search, verify=verify)), \
+                patch.object(profile_search, "search_sources", chat_search), \
                 patch.object(public_sources, "check_profile", profile_check), \
                 patch.object(osint.discovery, "run", no_discovery), \
                 patch.object(server.guard, "reserve", reserve), \
@@ -333,7 +347,8 @@ def serve(origin, listener, cert_path, key_path, verify):
                     client.cookies.clear()
                     Path('/tmp/source-audit-ready').write_text('ready')
                     print(f'\nСТЕНД АУДИТА ИСТОЧНИКОВ ГОТОВ: {origin}/account/login', flush=True)
-                    live_sources = 'LeakCheck, GitHub, GitLab' if verify else 'LeakCheck, GitHub, GitLab, Amazon по телефону'
+                    live_sources = ('LeakCheck, GitHub, GitLab' if verify else
+                                    'LeakCheck, GitHub и GitLab в отчёте, GitHub в чате, Amazon по телефону')
                     print(f'Живые источники: {live_sources}.', flush=True)
                     print('Регистрация не нужна: два тестовых аккаунта уже подготовлены.', flush=True)
                     if verify:
@@ -374,6 +389,7 @@ def main():
                 ACCOUNT_SECRET=secrets.token_hex(32), ACCOUNT_REPORT_KEY=Fernet.generate_key().decode(),
                 MAIL_PROVIDER="brevo", MAIL_FROM="sender@example.com", BREVO_API_KEY="fixture-only",
                 AI_SUMMARY_ENABLED="false", MONITOR_ENABLED="false", HIBP_API_KEY="", RENDER="false",
+                PROFILE_SEARCH_ENABLED="false" if options.verify else "true",
             )
             if not serve(origin, listener, cert_path, key_path, options.verify):
                 raise SystemExit(1)

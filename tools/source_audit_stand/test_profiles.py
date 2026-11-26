@@ -1,10 +1,14 @@
 """Offline tests of the stand's network boundary and real adapter delegation."""
+from contextlib import redirect_stdout
+from io import StringIO
 import unittest
+from unittest.mock import patch
 
 import httpx
 import trio
 
 from profiles import SourceTransport, request_source
+import profile_search
 import public_sources
 
 
@@ -40,6 +44,35 @@ class ProfileRoutingTests(unittest.TestCase):
                     await client.get('https://unapproved.example/')
             self.assertEqual(calls, [])
         trio.run(run)
+
+    def test_chat_search_uses_only_the_github_html_route(self):
+        client_factory = httpx.AsyncClient
+        requests = []
+
+        def respond(request):
+            requests.append(request)
+            return httpx.Response(200, headers={'Content-Type': 'text/html'}, text=(
+                '<meta name="octolytics-dimension-user_login" content="octocat">'
+                '<meta property="og:url" content="https://github.com/octocat">'
+            ))
+
+        def client(**kwargs):
+            transport = SourceTransport(httpx.MockTransport(respond), chat=True)
+            return client_factory(transport=transport, **kwargs)
+
+        log = StringIO()
+        with patch.object(httpx, 'AsyncClient', client), redirect_stdout(log):
+            rows = trio.run(profile_search.search_sources, 'Octocat')
+
+        github, = [row for row in rows if row['site'] == 'GitHub']
+        self.assertEqual(github, {'site': 'GitHub', 'status': 'found', 'url': 'https://github.com/octocat'})
+        request, = requests
+        self.assertEqual(str(request.url), 'https://github.com/Octocat')
+        self.assertEqual(request.headers['Accept'], 'text/html')
+        self.assertIn('"content_type": "text/html"', log.getvalue())
+        self.assertNotIn('json_error', log.getvalue())
+        for url in ('https://github.com/octocat?tab=repositories', 'https://github.com/octocat/repo'):
+            self.assertIsNone(request_source(httpx.Request('GET', url), chat=True))
 
     def test_production_adapters_receive_transport_responses(self):
         async def run():

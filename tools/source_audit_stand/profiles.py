@@ -16,9 +16,13 @@ def control_label(username):
             'pvtkz8q4n2x7r9': 'synthetic_absent'}.get(username.casefold(), 'custom')
 
 
-def request_source(request):
+def request_source(request, *, chat=False):
     url = request.url
     if request.method != 'GET' or url.scheme != 'https' or url.port not in (None, 443) or url.username or url.password:
+        return None
+    if chat:
+        if url.host == 'github.com' and not url.query and re.fullmatch(r'/[A-Za-z0-9-]{1,39}', url.path):
+            return audit_log.GITHUB_CHAT
         return None
     if url.host == 'api.github.com' and not url.query and re.fullmatch(r'/users/[A-Za-z0-9-]{1,39}', url.path):
         return 'GitHub'
@@ -34,10 +38,11 @@ def skipped(source):
 
 
 class SourceTransport(httpx.AsyncBaseTransport):
-    def __init__(self, live_transport=None, *, amazon=False, amazon_html_dir=None):
+    def __init__(self, live_transport=None, *, amazon=False, amazon_html_dir=None, chat=False):
         self.live = live_transport if live_transport is not None else httpx.AsyncHTTPTransport()
         self.mode = 'live' if live_transport is None else 'simulated'
         self.amazon = amazon
+        self.chat = chat
         self.amazon_html_dir = amazon_html_dir
         self.amazon_response_count = 0
 
@@ -51,10 +56,10 @@ class SourceTransport(httpx.AsyncBaseTransport):
             path = url.path if url.path in ('/ap/signin', '/ap/signin/', '/ax/claim') else '/[redacted]'
             logged_url = f'https://www.amazon.com{path}'
         else:
-            source = request_source(request)
+            source = request_source(request, chat=self.chat)
             if source is None:
-                raise httpx.RequestError('Only GitHub/GitLab user API endpoints are enabled', request=request)
-            query = url.path.rsplit('/', 1)[1] if source == 'GitHub' else url.params['username']
+                raise httpx.RequestError('Endpoint is outside the source audit scope', request=request)
+            query = url.params['username'] if source == 'GitLab' else url.path.rsplit('/', 1)[1]
             logged_url = str(url)
         audit_log.request(source, query, request.method, logged_url, mode=self.mode)
         started = time.monotonic()

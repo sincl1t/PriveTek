@@ -6,6 +6,7 @@ from helpers import trace_context, trace_lock
 
 SOURCES = {'LeakCheck', 'GitHub', 'GitLab', 'Amazon'}
 PHONE_QUERY = 'submitted'
+GITHUB_CHAT = 'GitHub (чат)'
 LABELS = {'found': 'Найдены сведения', 'not_found': 'Находок в источнике нет',
           'possible': 'Возможная регистрация', 'unknown': 'Неопределённый результат',
           'unavailable': 'Проверка недоступна', 'skipped': 'Не проверялось',
@@ -66,7 +67,7 @@ def response_fields(source, payload):
 
 
 def response(source, query, http_response, elapsed_ms):
-    if source == 'Amazon':
+    if source in ('Amazon', GITHUB_CHAT):
         fields = {'content_type': http_response.headers.get('content-type'),
                   'bytes': len(http_response.content)}
     else:
