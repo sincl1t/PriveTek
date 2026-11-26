@@ -43,20 +43,22 @@ class SourceTransport(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request):
         url = request.url
+        details = None
         if self.amazon:
             if (url.scheme != 'https' or url.host != 'www.amazon.com' or url.port not in (None, 443)
                     or url.username or url.password):
                 raise httpx.RequestError('Only the Amazon origin is enabled during its phone check', request=request)
             source, query = 'Amazon', audit_log.PHONE_QUERY
-            path = url.path if url.path in ('/ap/signin', '/ap/signin/', '/ax/claim') else '/[redacted]'
-            logged_url = f'https://www.amazon.com{path}'
+            media_type = request.headers.get('content-type', '').split(';', 1)[0].strip().lower()
+            if request.method == 'POST' and media_type == 'application/x-www-form-urlencoded':
+                await request.aread()
+                details = audit_log.amazon_form(request)
         else:
             source = request_source(request)
             if source is None:
                 raise httpx.RequestError('Only GitHub/GitLab user API endpoints are enabled', request=request)
             query = url.path.rsplit('/', 1)[1] if source == 'GitHub' else url.params['username']
-            logged_url = str(url)
-        audit_log.request(source, query, request.method, logged_url, mode=self.mode)
+        audit_log.request(source, query, request.method, url, mode=self.mode, details=details)
         started = time.monotonic()
         try:
             response = await self.live.handle_async_request(request)
@@ -64,7 +66,7 @@ class SourceTransport(httpx.AsyncBaseTransport):
         except httpx.HTTPError as error:
             audit_log.failure(source, query, error)
             raise
-        audit_log.response(source, query, response, round((time.monotonic() - started) * 1000))
+        audit_log.response(source, query, response, round((time.monotonic() - started) * 1000), request_url=url)
         if self.amazon and self.amazon_html_dir is not None:
             self.amazon_response_count += 1
             try:

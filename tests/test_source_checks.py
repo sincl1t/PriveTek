@@ -36,7 +36,7 @@ def test_captcha_stops_before_submission():
     assert len(requests)==1
 
 
-@pytest.mark.parametrize('action',['https://evil.example/ap/signin','/ap/register','http://www.amazon.com/ap/signin'])
+@pytest.mark.parametrize('action',['https://evil.example/ap/signin','/ap/register','http://www.amazon.com/ap/signin','/ax/claim/intent'])
 def test_unexpected_action_never_receives_email(action):
     out,requests=run(sources.amazon_email,[httpx.Response(200,text=f'<form method="post" action="{action}"><input name="email"></form>')])
     assert out[0]['exists'] is None
@@ -45,11 +45,52 @@ def test_unexpected_action_never_receives_email(action):
 
 @pytest.mark.parametrize('body,expected',[
     ('<div id="auth-password-missing-alert" hidden></div>',None),
-    ('<form><input name="password" type="password"></form>',True)])
+    ('<form method="post" action="/ap/signin"><input name="password" type="password"></form>',None),
+    ('<style>.login-placeholder { display: none }</style><form method="post" action="/ap/signin">'
+     '<input class="login-placeholder" name="password" type="password"></form>',None),
+    ("<h1>Looks like you're new to Amazon</h1><button>Proceed to create an account</button>",False)])
 def test_amazon_result(body,expected):
     out,requests=run(sources.amazon_email,[httpx.Response(200,text='<form method="post" action="/ap/signin"><input name="email"><input type="hidden" name="token" value="x"></form>'),httpx.Response(200,text=body)])
     assert requests[1].url.path=='/ap/signin'
+    assert requests[1].content == b'token=x&email=test%40example.invalid'
     assert out[0]['exists'] is expected
+
+
+@pytest.mark.parametrize('container_class,styles,phone,expected', [
+    ('a-section', '', False, 'possible'),
+    ('unknown-layout', '', False, 'unavailable'),
+    ('a-section', '<style>.a-section { display: none }</style>', False, 'unavailable'),
+    ('a-section', '', True, 'unavailable'),
+])
+def test_amazon_password_step_requires_confirmed_email_markup(container_class, styles, phone, expected):
+    password_step = (f'{styles}<form name="signIn" method="post" action="/ap/signin">'
+                     '<input id="ap_email" name="email" type="hidden">'
+                     '<input id="ap-credential-autofill-hint" name="email" type="text" class="a-input-text hide">'
+                     f'<div class="{container_class}"><label for="ap_password">Password</label>'
+                     '<input id="ap_password" name="password" type="password" autocomplete="current-password">'
+                     '<input id="signInSubmit" type="submit"></div></form>')
+
+    async def phone_lookup(_email, client, out):
+        await sources.amazon_phone('2025550123', '1', client, out)
+
+    out, _ = run(phone_lookup if phone else sources.amazon_email, [
+        httpx.Response(200, text='<form method="post" action="/ap/signin"><input name="email"></form>'),
+        httpx.Response(200, text=password_step),
+    ])
+    checks = []
+    osint.collect(out, [], checks, 'phone' if phone else 'email')
+    assert checks[0]['status'] == expected
+
+
+def test_amazon_email_does_not_follow_phone_intent():
+    out, requests = run(sources.amazon_email, [
+        httpx.Response(200, text='<form method="post" action="/ax/claim"><input name="email">'
+                                 '<input type="hidden" name="claimType" value=""></form>'),
+        httpx.Response(302, headers={'Location': '/ax/claim/intent'}),
+    ])
+    assert [request.method for request in requests] == ['GET', 'POST']
+    assert requests[1].content == b'claimType=&email=test%40example.invalid'
+    assert out[0]['exists'] is None
 
 
 @pytest.mark.parametrize('payload,expected',[
@@ -146,3 +187,27 @@ def test_avatar_is_not_reported_as_breach(tmp_path):
     text = ''.join(p.extract_text() for p in PdfReader(pdf_gen.create_report(data, tmp_path)).pages)
     assert 'Публичные аватары по email' in text
     assert 'Gravatar: Найдены сведения' in text
+
+
+@pytest.mark.parametrize('phone', [False, True])
+@pytest.mark.parametrize('wrapper', [
+    '<style>.inactive-step {{display:none}}</style><div class="inactive-step">{}</div>',
+    '<div class="unknown-layout">{}</div>',
+    '<div inert>{}</div>',
+    '<div style="opacity:0">{}</div>',
+    '<div>{}<style>h1 {{display:none}}</style></div>',
+])
+def test_amazon_uncertain_registration_screen_is_not_absence(phone, wrapper):
+    from bs4 import BeautifulSoup
+    screen = "<h1>Looks like you're new to Amazon</h1><button>Proceed to create an account</button>"
+    with pytest.raises(sources.Unavailable):
+        sources.amazon_result(BeautifulSoup(wrapper.format(screen), 'html.parser'),
+                              'https://www.amazon.com/ax/claim', phone_number=phone)
+
+
+@pytest.mark.parametrize('phone', [False, True])
+def test_amazon_explicit_registration_step_is_still_not_found(phone):
+    from bs4 import BeautifulSoup
+    screen = "<div class='a-section'><h1>Looks like you're new to Amazon</h1><button>Proceed to create an account</button></div>"
+    assert sources.amazon_result(BeautifulSoup(screen, 'html.parser'),
+                                 'https://www.amazon.com/ax/claim', phone_number=phone) is False

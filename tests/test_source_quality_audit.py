@@ -337,13 +337,52 @@ def test_profile_failure_does_not_hide_other_source(monkeypatch, tmp_path, unava
     "response,expected_status,reason_fragment",
     [
         pytest.param(
-            httpx.Response(200, text='<form><input name="password" type="password"></form>'),
-            "possible", "Косвенный признак", id="password-form",
+            httpx.Response(200, text='<form method="post" action="/ap/signin">'
+                                     '<input name="password" type="password"></form>'),
+            "unavailable", "распознаваемый результат", id="ambiguous-password-form",
+        ),
+        pytest.param(
+            httpx.Response(200, text='<form id="ap_login_form" method="post" action="/ax/claim">'
+                                     '<input name="email" type="text">'
+                                     '<input id="auth-credential-autofill-hint" class="aok-hidden" '
+                                     'name="password" type="password">'
+                                     '<div id="invalid-phone-alert" class="aok-hidden">Invalid mobile number</div></form>'),
+            "unavailable", "распознаваемый результат", id="hidden-autofill",
+        ),
+        pytest.param(
+            httpx.Response(200, text='<form method="post" action="/ap/signin">'
+                                     '<div style="display: none"><input name="password" type="password"></div></form>'),
+            "unavailable", "распознаваемый результат", id="hidden-password-container",
+        ),
+        pytest.param(
+            httpx.Response(200, text='<style>.login-placeholder { display: none }</style>'
+                                     '<form method="post" action="/ap/signin">'
+                                     '<div class="login-placeholder"><input name="password" type="password"></div></form>'),
+            "unavailable", "распознаваемый результат", id="css-hidden-password-container",
+        ),
+        pytest.param(
+            httpx.Response(200, text='<form method="post" action="/ax/claim">'
+                                     '<input name="email" type="text">'
+                                     '<input id="auth-credential-autofill-hint" class="aok-hidden" '
+                                     'name="password" type="password">'
+                                     '<div id="invalid-phone-alert">Invalid mobile number</div></form>'),
+            "unavailable", "Amazon отклонил номер телефона", id="invalid-mobile-number",
         ),
         pytest.param(
             httpx.Response(200, text="<h1>Looks like you're new to Amazon</h1>"
                                      "<button>Proceed to create an account</button>"),
-            "unavailable", "распознаваемый результат", id="new-account-screen",
+            "not_found", "Amazon предложил создать аккаунт", id="new-account-screen",
+        ),
+        pytest.param(
+            httpx.Response(200, text="<template><h1>Looks like you're new to Amazon</h1>"
+                                     "<button>Proceed to create an account</button></template>"),
+            "unavailable", "распознаваемый результат", id="hidden-new-account-screen",
+        ),
+        pytest.param(
+            httpx.Response(200, text="<style>.inactive-step {display:none}</style>"
+                                     "<div class='inactive-step'><h1>Looks like you're new to Amazon</h1>"
+                                     "<button>Proceed to create an account</button></div>"),
+            "unavailable", "распознаваемый результат", id="css-hidden-new-account-screen",
         ),
         pytest.param(
             httpx.ReadTimeout("Synthetic read timeout"),
@@ -352,6 +391,18 @@ def test_profile_failure_does_not_hide_other_source(monkeypatch, tmp_path, unava
         pytest.param(
             httpx.Response(429, text='<form><input name="password" type="password"></form>'),
             "unavailable", "HTTP 429", id="rate-limit",
+        ),
+        pytest.param(
+            httpx.Response(302, headers={"Location": "/ax/aaut/verify/ap/challenge?session=synthetic"}),
+            "unavailable", "Amazon запросил дополнительную проверку", id="challenge-redirect",
+        ),
+        pytest.param(
+            httpx.Response(307, headers={"Location": "https://www.amazon.com/ax/aaut/verify/ap/challenge"}),
+            "unavailable", "Amazon запросил дополнительную проверку", id="challenge-redirect-preserve-method",
+        ),
+        pytest.param(
+            httpx.Response(302, headers={"Location": "https://example.invalid/ax/aaut/verify/ap/challenge"}),
+            "unavailable", "неподдерживаемую страницу", id="challenge-path-on-other-origin",
         ),
         pytest.param(
             httpx.Response(200, text='<html><main>Unexpected page</main></html>'),
@@ -365,9 +416,16 @@ def test_amazon_phone_result_in_pdf(monkeypatch, tmp_path, response, expected_st
     def handler(request):
         requests.append(request)
         if request.method == "GET":
+            if request.url.path == "/ax/claim/intent":
+                assert request.url.params["arb"] == "synthetic"
+                return response
             return httpx.Response(
-                200, text='<form method="post" action="/ap/signin"><input name="email"></form>',
+                200, text='<form method="post" action="/ax/claim"><input name="email">'
+                          '<input type="hidden" name="claimType" value="">'
+                          '<input type="hidden" name="countryCode" value=""></form>',
             )
+        if expected_status == "not_found":
+            return httpx.Response(302, headers={"Location": "/ax/claim/intent?arb=synthetic"})
         if isinstance(response, httpx.ReadTimeout):
             raise response
         return response
@@ -380,10 +438,13 @@ def test_amazon_phone_result_in_pdf(monkeypatch, tmp_path, response, expected_st
     monkeypatch.setattr(osint.httpx, "AsyncClient", mock_client)
     results = osint.search(phone="+1 (202) 555-0123")
 
-    assert [(request.method, request.url.host) for request in requests] == [
-        ("GET", "www.amazon.com"), ("POST", "www.amazon.com"),
-    ]
-    assert requests[1].content == b"email=12025550123"
+    expected_requests = [("GET", "/ap/signin"), ("POST", "/ax/claim")]
+    if expected_status == "not_found":
+        expected_requests.append(("GET", "/ax/claim/intent"))
+        assert requests[-1].content == b""
+    assert [(request.method, request.url.path) for request in requests] == expected_requests
+    assert all(request.url.host == "www.amazon.com" for request in requests)
+    assert requests[1].content == b"claimType=phoneNumber&countryCode=&email=%2B12025550123"
     check, = [row for row in results["checks"] if (row["source"], row["kind"]) == ("Amazon", "phone")]
     assert check["status"] == expected_status
     assert reason_fragment in check["reason"]
@@ -396,17 +457,12 @@ def test_amazon_phone_result_in_pdf(monkeypatch, tmp_path, response, expected_st
         "Публичные профили по username", 1,
     )[0]
     assert reason_fragment in section
-    assert "Amazon: Находок в источнике нет" not in section
-    findings = results["identity_resolution"]["findings"]
-    if expected_status == "possible":
-        finding, = findings
-        assert finding["source"] == "Amazon"
-        assert finding["decision"] == "unreviewed"
-        assert finding["evidence"] == "indirect_signal"
-        assert finding["identifier_id"] == "identifier-phone"
-        assert "Находки и возможные совпадения Amazon: Возможная регистрация" in section
-        assert "Косвенный признак." in pdf_text
+    assert ("Amazon: Находок в источнике нет" in section) == (expected_status == "not_found")
+    assert "Amazon: Возможная регистрация" not in section
+    assert results["identity_resolution"]["findings"] == []
+    if expected_status == "not_found":
+        assert results["phone_registrations"] == []
+        assert "Проверки без находок Amazon: Находок в источнике нет" in section
     else:
-        assert findings == []
         assert results["phone_registrations"] is None
         assert "Ограничения проверки Amazon: Проверка недоступна" in section

@@ -1,11 +1,19 @@
 """Readable audit evidence: request → response → product result → actual PDF text."""
 import json
 import re
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 from helpers import trace_context, trace_lock
 
 SOURCES = {'LeakCheck', 'GitHub', 'GitLab', 'Amazon'}
 PHONE_QUERY = 'submitted'
+LOG_ROUTES_BY_HOST = {
+    'api.github.com': ('/users',),
+    'gitlab.com': ('/api/v4/users',),
+    'leakcheck.io': ('/api/public',),
+    'www.amazon.com': ('/ap/signin', '/ap/register', '/ax/claim', '/ax/claim/intent', '/ax/aaut/verify/ap/challenge'),
+}
+DEFAULT_PORTS = {'http': 80, 'https': 443}
 LABELS = {'found': 'Найдены сведения', 'not_found': 'Находок в источнике нет',
           'possible': 'Возможная регистрация', 'unknown': 'Неопределённый результат',
           'unavailable': 'Проверка недоступна', 'skipped': 'Не проверялось',
@@ -32,11 +40,68 @@ def begin(email, usernames, *, phone_supplied=False):
     trace_context.audit_checks = []
 
 
-def request(source, query, method, url, mode='live'):
+def request(source, query, method, url, mode='live', details=None):
+    safe_url = mask_request_url(url)
     requests = getattr(trace_context, 'audit_requests', None)
     if requests is not None:
-        requests[(source, query)] = f'{method} {url}'
-    event(source, query, 'ЗАПРОС', f'{method} {url} | mode={mode}')
+        requests[(source, query)] = f'{method} {safe_url}'
+    summary = f'{method} {safe_url} | mode={mode}'
+    if details is not None:
+        summary += f' | {compact(details)}'
+    event(source, query, 'ЗАПРОС', summary)
+
+
+def amazon_form(request):
+    """Describe an outgoing form without logging its identifier or tokens."""
+    fields = parse_qs(request.content.decode('utf-8', errors='replace'), keep_blank_values=True)
+    claim_type = fields.get('claimType', [None])[0]
+    country_code = fields.get('countryCode', [None])[0]
+    identifier = fields.get('email', [None])[0]
+    details = {
+        'claimType': claim_type if claim_type in (None, '', 'phoneNumber', 'email', 'emailAddress') else '[other]',
+        'countryCode': country_code if not country_code or re.fullmatch(r'[A-Z]{2}', country_code) else '[other]',
+        'email_has_plus': identifier.startswith('+') if identifier is not None else None,
+        'email_digit_count': sum(character.isdecimal() for character in identifier) if identifier is not None else None,
+    }
+    return details
+
+
+def mask_url_path(path, known_routes=()):
+    route = max(
+        (route for route in known_routes if path == route or path.startswith(route + '/')),
+        key=len, default='',
+    )
+    if not route:
+        return path if path in ('', '/') else '/[redacted]'
+    suffix = path[len(route):]
+    return route + '/'.join('[redacted]' if segment else '' for segment in suffix.split('/'))
+
+
+def mask_request_url(url):
+    try:
+        target = urlsplit(str(url))
+    except ValueError:
+        return '[redacted]'
+    if target.scheme not in DEFAULT_PORTS or not target.hostname:
+        return '[redacted]'
+    path = mask_url_path(target.path, LOG_ROUTES_BY_HOST.get(target.hostname, ()))
+    return f'{target.scheme}://{target.hostname}{path}'
+
+
+def redirect_fields(location, request_url):
+    if not location:
+        return {'location_path': None}
+    try:
+        target = urlsplit(urljoin(str(request_url), location))
+        request = urlsplit(str(request_url))
+        target_origin = (target.scheme, target.hostname, target.port or DEFAULT_PORTS.get(target.scheme))
+        request_origin = (request.scheme, request.hostname, request.port or DEFAULT_PORTS.get(request.scheme))
+    except ValueError:
+        return {'location_path': '/[redacted]', 'location_origin': 'invalid'}
+    path = mask_url_path(target.path, LOG_ROUTES_BY_HOST.get(target.hostname, ()))
+    origin = 'same' if target_origin == request_origin and not (target.username or target.password) else 'other'
+    return {'location_path': path, 'location_origin': origin, 'location_host': target.hostname,
+            'location_scheme': target.scheme, 'location_has_query': bool(target.query)}
 
 
 def response_fields(source, payload):
@@ -65,7 +130,7 @@ def response_fields(source, payload):
     return fields or {'json_type': 'object', 'recognized_fields': []}
 
 
-def response(source, query, http_response, elapsed_ms):
+def response(source, query, http_response, elapsed_ms, *, request_url=None):
     if source == 'Amazon':
         fields = {'content_type': http_response.headers.get('content-type'),
                   'bytes': len(http_response.content)}
@@ -76,6 +141,9 @@ def response(source, query, http_response, elapsed_ms):
             fields = {'json_error': 'Ответ не является корректным JSON',
                       'content_type': http_response.headers.get('content-type'),
                       'bytes': len(http_response.content)}
+    location = http_response.headers.get('location')
+    if source == 'Amazon' or location:
+        fields.update(redirect_fields(location, request_url))
     observation = {'http_status': http_response.status_code, 'elapsed_ms': elapsed_ms, 'details': fields}
     observations = getattr(trace_context, 'audit_responses', None)
     if observations is not None:

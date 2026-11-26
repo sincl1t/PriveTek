@@ -39,10 +39,13 @@ def validate(response):
     return soup
 
 
-async def guarded(source, operation, out):
+async def guarded(source, operation, out, *, not_found_reason=None):
     try:
         exists = await operation()
-        out.append(dict(name=source, domain=source.lower()+'.com', exists=exists, rateLimit=False))
+        result = dict(name=source, domain=source.lower()+'.com', exists=exists, rateLimit=False)
+        if exists is False and not_found_reason is not None:
+            result.update(status='not_found', reason=not_found_reason)
+        out.append(result)
     except Unavailable as exc:
         out.append(dict(name=source, exists=None, rateLimit=True, reason=str(exc)))
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
@@ -50,7 +53,95 @@ async def guarded(source, operation, out):
                         reason='Ошибка соединения или неизвестный формат ответа источника.'))
 
 
-async def amazon_email(email, client, out):
+AMAZON_SIGNIN_PATHS = ('/ap/signin', '/ap/signin/', '/ax/claim')
+AMAZON_CHALLENGE_PATH = '/ax/aaut/verify/ap/challenge'
+HIDDEN_STYLE = re.compile(r'(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:!important\s*)?(?:;|$)', re.I)
+# Classes on the controls and their ancestors in the confirmed email sign-in step.
+AMAZON_EMAIL_PASSWORD_CLASSES = frozenset({
+    'a-aui_72554-c', 'a-aui_template_weblab_cache_333406-c', 'a-box', 'a-box-inner',
+    'a-button', 'a-button-inner', 'a-button-input', 'a-button-primary', 'a-button-span12',
+    'a-bw_aui_dark_mode_mshop_ios_1390013-t2', 'a-column', 'a-form-label', 'a-input-text',
+    'a-m-us', 'a-no-js', 'a-padding-extra-large', 'a-padding-medium', 'a-row',
+    'a-section', 'a-spacing-base', 'a-spacing-large', 'a-spacing-none', 'a-span5', 'a-span12',
+    'ap-locale-en_US', 'auth-autofocus', 'auth-disable-button-on-submit', 'auth-pagelet-container',
+    'auth-real-time-validation', 'auth-required-field', 'auth-validate-form', 'auth-workflow',
+})
+
+
+def amazon_visible(element):
+    return not any(
+        node.name == 'template' or node.has_attr('hidden') or node.get('aria-hidden', '').lower() == 'true'
+        or 'aok-hidden' in node.get('class', ()) or HIDDEN_STYLE.search(node.get('style', ''))
+        for node in (element, *element.parents)
+    )
+
+
+def amazon_confirmed_visible(element):
+    """Unknown CSS or inactive ancestors are not evidence of an active UI step."""
+    return amazon_visible(element) and not any(
+        node.has_attr('disabled') or node.has_attr('inert') or node.get('style')
+        or not AMAZON_EMAIL_PASSWORD_CLASSES.issuperset(node.get('class', ()))
+        for node in (element, *element.parents)
+    )
+
+
+def amazon_email_password_step(soup, response_url):
+    forms = soup.select('form[name="signIn"][method="post"]')
+    # The reference step has no inline stylesheet. The HTML parser cannot
+    # establish whether additional rules hide a control.
+    if len(forms) != 1 or soup.select_one('style') is not None:
+        return False
+    form = forms[0]
+    target = urlparse(urljoin(str(response_url), form.get('action', '')))
+    if target.scheme != 'https' or target.netloc != 'www.amazon.com' or target.path != '/ap/signin':
+        return False
+    if form.select_one('input#ap_email[name="email"][type="hidden"]') is None or any(
+        node.get('id') != 'ap-credential-autofill-hint' or 'hide' not in node.get('class', ())
+        for node in form.select('input[name="email"]:not([type="hidden"])')
+    ):
+        return False
+
+    for selector in (
+        'input#ap_password[name="password"][type="password"][autocomplete="current-password"]:not([readonly])',
+        'label[for="ap_password"]',
+        'input#signInSubmit[type="submit"]',
+    ):
+        controls = form.select(selector)
+        if len(controls) != 1:
+            return False
+        control = controls[0]
+        if not amazon_confirmed_visible(control):
+            return False
+    return True
+
+
+def amazon_result(soup, response_url, *, phone_number):
+    invalid_phone = soup.select_one('#invalid-phone-alert')
+    if invalid_phone is not None and amazon_visible(invalid_phone):
+        raise Unavailable('Amazon отклонил номер телефона; проверка не выполнена.')
+
+    new_account = soup.select_one('style') is None and any(
+        amazon_confirmed_visible(node) and ' '.join(node.stripped_strings).replace('’', "'").casefold() == "looks like you're new to amazon"
+        for node in soup.select('h1, h2')
+    ) and any(
+        amazon_confirmed_visible(node) and ' '.join((node.get('value') or node.get_text(' ', strip=True)).split()).casefold()
+        == 'proceed to create an account'
+        for node in soup.select('button, input[type="submit"]')
+    )
+
+    if new_account and not any(
+        node.get('id') != 'auth-credential-autofill-hint' and not node.has_attr('disabled') and amazon_visible(node)
+        for node in soup.select('input[type="password"]')
+    ):
+        return False
+    if not new_account and not phone_number and amazon_email_password_step(soup, response_url):
+        return True
+    raise Unavailable('Amazon не вернул распознаваемый результат; наличие аккаунта неизвестно.')
+
+
+async def _amazon_lookup(identifier, client, out, *, phone_number=False):
+    redirect_paths = AMAZON_SIGNIN_PATHS + ('/ax/claim/intent',) if phone_number else AMAZON_SIGNIN_PATHS
+
     async def operation():
         response = await client.get('https://www.amazon.com/ap/signin', params={
             'openid.assoc_handle': 'usflex', 'openid.mode': 'checkid_setup',
@@ -66,35 +157,42 @@ async def amazon_email(email, client, out):
         action = urljoin(str(response.url), form.get('action', ''))
         target = urlparse(action)
         if (target.scheme != 'https' or target.netloc != 'www.amazon.com'
-                or target.path not in ('/ap/signin', '/ap/signin/', '/ax/claim')
+                or target.path not in AMAZON_SIGNIN_PATHS
                 or form.get('method', '').lower() != 'post'):
             raise Unavailable('Форма входа Amazon изменилась; отправка остановлена.')
         data = {i['name']: i.get('value', '') for i in form.select('input[name]')
                 if i.get('type', '').lower() == 'hidden'}
-        data['email'] = email
+        data['email'] = identifier
+        if phone_number:
+            data['claimType'] = 'phoneNumber'
         reply = await client.post(action, data=data, follow_redirects=False)
-        # The current identifier step redirects back to /ax/claim. Only follow
-        # same-origin login pages, and never redirect a POST or bypass CAPTCHA.
+        # Follow only recognized same-origin login steps, using GET after a redirect.
         for _ in range(3):
-            if reply.status_code not in (301, 302, 303):
+            if reply.status_code not in (301, 302, 303, 307, 308):
                 break
             location = reply.headers.get('location')
             target_url = urljoin(str(reply.url), location or '')
             redirect = urlparse(target_url)
-            if (not location or redirect.scheme != 'https' or redirect.netloc != 'www.amazon.com'
-                    or redirect.path not in ('/ap/signin', '/ap/signin/', '/ax/claim')):
+            same_origin = redirect.scheme == 'https' and redirect.netloc == 'www.amazon.com'
+            if location and same_origin and redirect.path == AMAZON_CHALLENGE_PATH:
+                raise Unavailable('Amazon запросил дополнительную проверку; проверка не выполнена.')
+            if reply.status_code in (307, 308):
+                break
+            if not location or not same_origin or redirect.path not in redirect_paths:
                 raise Unavailable('Amazon перенаправил на неподдерживаемую страницу; проверка остановлена.')
             reply = await client.get(target_url, follow_redirects=False)
-        soup = validate(reply)
-        password = soup.select_one('form input[name="password"][type="password"]')
-        if password is not None:
-            return True
-        raise Unavailable('Amazon не вернул распознаваемый результат; наличие аккаунта неизвестно.')
-    await guarded('Amazon', operation, out)
+        return amazon_result(validate(reply), reply.url, phone_number=phone_number)
+
+    await guarded('Amazon', operation, out,
+                  not_found_reason='Amazon предложил создать аккаунт для указанного идентификатора.')
+
+
+async def amazon_email(email, client, out):
+    await _amazon_lookup(email, client, out)
 
 
 async def amazon_phone(phone, country_code, client, out):
-    await amazon_email(str(country_code)+str(phone), client, out)
+    await _amazon_lookup(f'+{country_code}{phone}', client, out, phone_number=True)
 
 
 async def instagram(email, client, out):

@@ -66,12 +66,12 @@ def test_phone_source_posts_country_code_and_number(action):
             requests.append(request)
             if request.method == 'GET':
                 return httpx.Response(200,text=f'<form method="post" action="{action}"><input name="email"><input type="hidden" name="token" value="abc"></form>')
-            assert b'email=12025550123' in request.content
-            return httpx.Response(200,text='<form><input name="password" type="password"></form>')
+            assert request.content == b'token=abc&email=%2B12025550123&claimType=phoneNumber'
+            return httpx.Response(200,text='<form method="post" action="/ap/signin"><input name="password" type="password"></form>')
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             out=[]
             await amazon_phone('2025550123','1',client,out)
-            assert out[0]['exists'] is True
+            assert out[0]['exists'] is None
             assert len(requests)==2
     trio.run(run)
 
@@ -128,7 +128,14 @@ def test_username_report_contains_profile(tmp_path):
     assert 'личность не подтверждена' in text
 
 
-@pytest.mark.parametrize('location,expected_requests', [('/ax/claim?step=2',3),('https://example.com/collect',2),('/ap/register',2)])
+@pytest.mark.parametrize('location,expected_requests', [
+    ('/ax/claim?step=2', 3),
+    ('/ax/claim/intent', 3),
+    ('https://example.com/ax/claim/intent', 2),
+    ('http://www.amazon.com/ax/claim/intent', 2),
+    ('/ax/claim/intent/extra', 2),
+    ('/ap/register', 2),
+])
 def test_amazon_redirect_is_bounded_and_same_origin(location,expected_requests):
     async def run():
         requests=[]
@@ -138,10 +145,11 @@ def test_amazon_redirect_is_bounded_and_same_origin(location,expected_requests):
                 return httpx.Response(200,text='<form method="post" action="/ax/claim"><input name="email"></form>')
             if request.method=='POST':
                 return httpx.Response(302,headers={'Location':location})
-            return httpx.Response(200,text='<form><input name="password" type="password"></form>')
+            return httpx.Response(200, text="<h1>Looks like you're new to Amazon</h1>"
+                                            "<button>Proceed to create an account</button>")
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             out=[]
             await amazon_phone('2025550123','1',client,out)
             assert len(requests)==expected_requests
-            assert out[0]['exists'] is (True if expected_requests==3 else None)
+            assert out[0]['exists'] is (False if expected_requests==3 else None)
     trio.run(run)

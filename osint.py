@@ -41,9 +41,12 @@ def collect(items, errors, checks=None, kind="email"):
             checks.append(dict(source=source, kind=kind, status="unavailable", reason=reason, checked_at=item.get('checked_at')))
         else:
             completed = True
+            status = 'possible' if item['exists'] else 'unknown'
+            if status == 'unknown' and item.get('status') == 'not_found':
+                status = 'not_found'
             checks.append(dict(source=source, kind=kind,
                                checked_at=item.get('checked_at'),
-                               status='possible' if item['exists'] else 'unknown',
+                               status=status,
                                reason=item.get('reason') or ('Косвенный признак регистрации; требует подтверждения.' if item['exists'] else 'Модуль не нашёл признак регистрации. Отсутствие аккаунта не подтверждено.')))
             if item['exists']:
                 found.append({'site': item.get('name'), 'domain': item.get('domain'), 'exists': True})

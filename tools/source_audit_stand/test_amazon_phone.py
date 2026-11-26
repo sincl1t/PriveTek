@@ -89,12 +89,49 @@ class AmazonRoutingTests(unittest.TestCase):
         with redirect_stdout(output):
             results = trio.run(run)
         self.assertEqual([request.method for request in requests], ['GET', 'POST', 'GET', 'POST'])
-        self.assertEqual(requests[1].content, b'token=secret&email=12025550123')
-        self.assertEqual(requests[3].content, b'token=secret&email=12025550124')
+        self.assertEqual(requests[1].content, b'token=secret&email=%2B12025550123&claimType=phoneNumber')
+        self.assertEqual(requests[3].content, b'token=secret&email=%2B12025550124&claimType=phoneNumber')
         self.assertEqual(len(results), 2)
         for result in results:
             self.assertIsNone(result['exists'])
             self.assertIn('HTTP 429', result['reason'])
         self.assertIn('POST https://www.amazon.com/ax/claim', output.getvalue())
+        self.assertIn('"claimType": "phoneNumber", "countryCode": null, "email_has_plus": true, "email_digit_count": 11',
+                      output.getvalue())
         for value in ('12025550123', '12025550124', 'secret', 'sensitive HTML', 'openid.'):
             self.assertNotIn(value, output.getvalue())
+
+    def test_logs_form_shape_and_redirect_path_without_identifiers(self):
+        def respond(request):
+            locations = {
+                '/ax/claim': '/ax/claim/intent?arb=private-token&email=%2B12025550123',
+                '/ax/claim/intent': 'https://private.example/private-path?token=private-token',
+                '/ap/signin': '/ax/claim/intent/12025550123/kqvmztrp/?token=private-token',
+                '/ax/claim/kqvmztrp': '/ax/aaut/verify/ap/challenge?session=private-token',
+            }
+            return httpx.Response(302, headers={'Location': locations[request.url.path]})
+
+        async def run():
+            transport = SourceTransport(httpx.MockTransport(respond), amazon=True)
+            async with httpx.AsyncClient(transport=transport) as client:
+                await client.post('https://www.amazon.com/ax/claim', data={
+                    'claimType': 'phoneNumber', 'countryCode': 'NL',
+                    'email': '+12025550123', 'anti-csrftoken-a2z': 'private-token',
+                })
+                await client.get('https://www.amazon.com/ax/claim/intent?arb=private-token')
+                await client.get('https://www.amazon.com/ap/signin')
+                await client.get('https://www.amazon.com/ax/claim/kqvmztrp')
+
+        output = StringIO()
+        with redirect_stdout(output):
+            asyncio.run(run())
+        log = output.getvalue()
+        self.assertIn('"claimType": "phoneNumber", "countryCode": "NL", "email_has_plus": true, "email_digit_count": 11', log)
+        self.assertIn('HTTP 302', log)
+        self.assertIn('"location_path": "/ax/claim/intent", "location_origin": "same"', log)
+        self.assertIn('"location_path": "/[redacted]", "location_origin": "other", "location_host": "private.example"', log)
+        self.assertIn('"location_path": "/ax/claim/intent/[redacted]/[redacted]/"', log)
+        self.assertIn('GET https://www.amazon.com/ax/claim/[redacted]', log)
+        self.assertIn('"location_path": "/ax/aaut/verify/ap/challenge"', log)
+        for value in ('12025550123', 'kqvmztrp', 'private-path', 'private-token', 'arb=', 'anti-csrftoken-a2z'):
+            self.assertNotIn(value, log)
