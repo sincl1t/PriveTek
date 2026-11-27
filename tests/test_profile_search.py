@@ -1,8 +1,16 @@
+import httpx
 import pytest
 
 import job_store
 import profile_search
 from test_accounts import client, db, login, register, settings  # noqa: F401
+
+
+GITHUB_SITE = ('GitHub', 'https://github.com/{username}', '[a-z0-9]+')
+GITHUB_PROFILE_HTML = (
+    '<meta name="octolytics-dimension-user_login" content="{username}">'
+    '<meta property="og:url" content="https://github.com/{username}">'
+)
 
 
 def test_profile_search_disabled_by_default(settings, monkeypatch):
@@ -78,9 +86,18 @@ def test_search_uses_all_username_sources_and_preserves_unavailable(monkeypatch)
 
 
 @pytest.mark.parametrize(('site', 'response', 'expected'), [
-    (('GitHub', 'https://github.com/{username}', '[a-z0-9]+'),
-     (200, '<meta name="octolytics-dimension-user_login" content="octocat"><meta property="og:url" content="https://github.com/octocat">'), 'found'),
-    (('GitHub', 'https://github.com/{username}', '[a-z0-9]+'), (403, 'blocked'), 'unavailable'),
+    (GITHUB_SITE, (200, GITHUB_PROFILE_HTML.format(username='octocat')), 'found'),
+    (GITHUB_SITE, (403, 'blocked'), 'unavailable'),
+    pytest.param(GITHUB_SITE, (200, GITHUB_PROFILE_HTML.format(username='octocat2')),
+                 'unavailable', id='github-similar-username'),
+    pytest.param(GITHUB_SITE, (200, '<title>Verify you are human</title><form><input name="captcha"></form>'),
+                 'unavailable', id='github-captcha'),
+    pytest.param(GITHUB_SITE, (429, GITHUB_PROFILE_HTML.format(username='octocat')),
+                 'unavailable', id='github-http-429'),
+    pytest.param(GITHUB_SITE, httpx.ReadTimeout('Synthetic read timeout'),
+                 'unavailable', id='github-timeout'),
+    pytest.param(GITHUB_SITE, (200, '<html><title>octocat · GitHub</title><h1>octocat</h1></html>'),
+                 'unavailable', id='github-unexpected-html'),
     (profile_search.EXTRA_SOURCES[1], (200, '<title>octocat | OpenStreetMap</title>'), 'found'),
     (profile_search.EXTRA_SOURCES[2], (200, '<title>Profile of octocat | RubyGems.org</title>'), 'found'),
     (profile_search.EXTRA_SOURCES[2], (200, '<title>Just a moment</title>'), 'unavailable'),
@@ -89,13 +106,14 @@ def test_search_uses_all_username_sources_and_preserves_unavailable(monkeypatch)
     (profile_search.EXTRA_SOURCES[0], (400, '{"error":"InvalidRequest","message":"Invalid actor"}'), 'unavailable'),
 ])
 def test_chat_public_source_rejects_unrecognized_responses(site, response, expected):
-    import httpx
     import trio
 
     async def check():
-        code, content = response
         def respond(request):
             assert request.headers.get('accept') == ('*/*' if site[0] == 'Bluesky' else 'text/html')
+            if isinstance(response, httpx.ReadTimeout):
+                raise response
+            code, content = response
             return httpx.Response(code, text=content, headers={'content-type': 'text/html'})
 
         mock = httpx.MockTransport(respond)
@@ -104,4 +122,7 @@ def test_chat_public_source_rejects_unrecognized_responses(site, response, expec
 
     result = trio.run(check)
     assert result['status'] == expected
-    assert bool(result.get('profile_url')) == (expected == 'found')
+    if expected == 'found':
+        assert result['profile_url']
+    else:
+        assert result.get('profile_url') is None

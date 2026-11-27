@@ -7,6 +7,7 @@ from helpers import trace_context, trace_lock
 
 SOURCES = {'LeakCheck', 'GitHub', 'GitLab', 'Amazon'}
 PHONE_QUERY = 'submitted'
+GITHUB_CHAT = 'GitHub (чат)'
 LOG_ROUTES_BY_HOST = {
     'api.github.com': ('/users',),
     'gitlab.com': ('/api/v4/users',),
@@ -131,7 +132,7 @@ def response_fields(source, payload):
 
 
 def response(source, query, http_response, elapsed_ms, *, request_url=None):
-    if source == 'Amazon':
+    if source in ('Amazon', GITHUB_CHAT):
         fields = {'content_type': http_response.headers.get('content-type'),
                   'bytes': len(http_response.content)}
     else:
