@@ -39,7 +39,9 @@ def test_db_profile_search_repeat_without_subscription(db, monkeypatch):
     assert client().get(url).status_code == 401
     assert c.post(url, json=body).status_code == 403
     assert c.post(url, json={**body, 'consent': False}, headers=headers).status_code == 422
-    assert c.post(url, json=body, headers=headers).status_code == 503
+    inconclusive = c.post(url, json=body, headers=headers)
+    assert inconclusive.status_code == 200
+    assert inconclusive.json()['results'] == [{'site': 'RubyGems', 'status': 'unavailable', 'url': None}]
     assert c.get(url).json()['free_available']
     response = c.post(url, json=body, headers=headers)
     assert response.status_code == 200
@@ -55,6 +57,39 @@ def test_db_profile_search_repeat_without_subscription(db, monkeypatch):
     with job_store.connect() as conn:
         conn.execute("UPDATE privetek_profile_search SET access_until=now()-interval '1 minute'")
     assert c.post(url, json=body, headers=headers).status_code == 200
+
+
+def test_db_profile_search_restores_latest_inconclusive_attempt(db, monkeypatch):
+    monkeypatch.setenv('PROFILE_SEARCH_ENABLED', 'true')
+    c = client()
+    register(c, db)
+    headers = {'X-CSRF-Token': login(c)}
+    url = '/api/account/profile-search'
+    found = [{'site': 'GitHub', 'status': 'found', 'url': 'https://github.com/octocat'}]
+    inconclusive = [
+        {'site': 'GitHub', 'status': 'unavailable', 'url': None},
+        {'site': 'Codeberg', 'status': 'skipped', 'url': None},
+    ]
+    calls = []
+
+    async def search(username):
+        calls.append(username)
+        return {'octocat': found, 'other.name': inconclusive, 'no.result': []}[username]
+
+    monkeypatch.setattr(profile_search, 'search', search)
+    earlier = c.post(url, json={'username': 'octocat', 'consent': True}, headers=headers)
+    assert earlier.status_code == 200
+    assert c.get(url).json()['results'] == found
+
+    latest = c.post(url, json={'username': 'other.name', 'consent': True}, headers=headers)
+    assert latest.status_code == 200
+    assert latest.json()['results'] == inconclusive
+    assert c.get(url).json()['results'] == inconclusive
+
+    failed = c.post(url, json={'username': 'no.result', 'consent': True}, headers=headers)
+    assert failed.status_code == 503
+    assert c.get(url).json()['results'] == inconclusive
+    assert calls == ['octocat', 'other.name', 'no.result']
 
 
 def test_search_uses_all_username_sources_and_preserves_unavailable(monkeypatch):

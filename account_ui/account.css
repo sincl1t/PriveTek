@@ -239,6 +239,8 @@ body.dialog-open { overflow: hidden; }
 .profile-chat-bubble p { margin: 0; }
 .profile-chat-results { margin: .5rem 0; padding-inline-start: 1.1rem; }
 .profile-chat-results li + li { margin-top: .4rem; }
+.profile-chat-details { margin-block: .5rem; }
+.profile-chat-details > summary { cursor: pointer; }
 .profile-chat-form { padding: 0 1rem 1rem; }
 .profile-chat-compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .4rem .65rem; align-items: stretch; }
 .profile-chat-label { grid-column: 1 / -1; }
