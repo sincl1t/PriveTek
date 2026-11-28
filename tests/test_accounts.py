@@ -260,7 +260,7 @@ def test_db_history_pagination_and_owner_filter(db):
     assert 'f'*32 not in {x['id'] for x in first['items']+second['items']}
 
 
-def test_archive_failure_does_not_break_existing_mail_delivery(settings,monkeypatch,tmp_path):
+def test_archive_failure_stops_mail_and_marks_order_failed(settings,monkeypatch,tmp_path,caplog):
     import osint
     pdf=tmp_path/'report.pdf';pdf.write_bytes(b'%PDF-test')
     monkeypatch.setattr(osint,'search',lambda **kwargs:{})
@@ -270,9 +270,10 @@ def test_archive_failure_does_not_break_existing_mail_delivery(settings,monkeypa
     mail=MagicMock();monkeypatch.setattr(server.email_sender,'send_report',mail)
     monkeypatch.setattr(server,'slots',MagicMock())
     server.background_task(server.Submission(Email='owner@example.com'),'c'*32)
-    mail.assert_called_once()
+    mail.assert_not_called()
     assert not pdf.exists()
-    assert job_store.record.call_args.args==('c'*32,'provider_accepted')
+    assert job_store.record.call_args.args==('c'*32,'failed')
+    assert 'stage=archive' in caplog.text and 'private storage failure' not in caplog.text
 
 
 @pytest.mark.skipif(os.getenv('ACCOUNTS_NATIVE_POSTGRES_TESTS') != '1', reason='Native PostgreSQL concurrency check; PGlite has a different connection model')

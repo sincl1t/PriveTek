@@ -1,21 +1,47 @@
 """HIBP account lookup. No retries or logging of email addresses / keys."""
 import os
+import threading
+import time
 from urllib.parse import quote
 import httpx
 
+
+_lock = threading.Lock()
+_next_request = 0.0
 
 def lookup(email, api_key=None):
     key = api_key if api_key is not None else os.getenv('HIBP_API_KEY', '').strip()
     def result(status, reason, breaches=None):
         return breaches, dict(source='HIBP', kind='breach', status=status, reason=reason)
+    if api_key is None and os.getenv('HIBP_ENABLED','').lower() == 'false':
+        return result('skipped', 'Проверка HIBP отключена командой сервиса.')
     if not key:
         return result('skipped', 'Не настроен ключ API; проверка утечек не выполнялась.')
+    global _next_request
+    try:
+        interval = float(os.getenv('HIBP_MIN_INTERVAL_SECONDS', '6.5'))
+        if not 0.1 <= interval <= 3600:
+            raise ValueError()
+    except ValueError:
+        return result('unavailable', 'Лимит HIBP не настроен; проверка не выполнялась.')
+    with _lock:
+        if time.monotonic() < _next_request:
+            return result('unavailable', 'Лимит HIBP: проверка не выполнена, результат неизвестен.')
+        _next_request = time.monotonic() + interval
     try:
         response = httpx.get('https://haveibeenpwned.com/api/v3/breachedaccount/' + quote(email, safe=''),
                              headers={'hibp-api-key': key, 'user-agent': 'PriveTek/0.2'},
-                             params={'truncateResponse': 'false', 'includeUnverified': 'false'}, timeout=20)
+                             params={'truncateResponse': 'false', 'includeUnverified': 'false'}, timeout=20,
+                             follow_redirects=False)
     except httpx.RequestError:
         return result('unavailable', 'Источник не ответил: ошибка соединения или время ожидания истекло.')
+    if response.status_code == 429:
+        try:
+            retry = max(interval, min(3600, float(response.headers.get('retry-after', '60'))))
+        except ValueError:
+            retry = max(interval, 60)
+        with _lock:
+            _next_request = max(_next_request, time.monotonic() + retry)
     if response.status_code == 404:
         return result('not_found', 'В доступных проверенных утечках HIBP совпадений нет. Это не гарантирует отсутствия утечек.', [])
     reasons = {401: 'Ключ API не принят. Команде сервиса нужно проверить настройки.',

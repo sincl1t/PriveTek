@@ -3,6 +3,7 @@ import json
 import os
 import re
 import secrets
+import job_store
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -124,7 +125,57 @@ def session_response(request, token):
 
 def action(data, request, name):
     ready()
+    if name in ('sms-start', 'sms-verify'):
+        import sms_provider
+        if not sms_provider.configured():
+            raise HTTPException(404, 'Вход по SMS пока не подключён')
     store.cleanup()
+    if name in ('sms-start', 'sms-verify'):
+        import phone_auth
+        import sms_provider
+        if not sms_provider.configured():
+            raise HTTPException(404, 'Вход по SMS пока не подключён')
+        if name == 'sms-start':
+            phone = data.get('phone')
+            from search_inputs import normalize_phone
+            try:
+                phone = normalize_phone(phone)
+            except (ValueError, TypeError):
+                raise HTTPException(422, 'Укажите номер с кодом страны') from None
+            if not phone:
+                raise HTTPException(422, 'Укажите номер с кодом страны')
+            quota(request, phone, 'sms-send', 3)
+            try:
+                challenge = phone_auth.issue(phone, 'login')
+            except ValueError as error:
+                raise HTTPException(429, str(error)) from None
+            return result(dict(challenge_id=challenge, expires_in=300,
+                message='Если номер подключён и входит в пилот, код придёт по SMS. Принятие запроса не подтверждает доставку.'))
+        challenge, code = data.get('challenge_id'), data.get('code')
+        quota(request, str(challenge), 'sms-verify', 10)
+        token = secrets.token_urlsafe(32)
+        outcome = phone_auth.redeem(challenge, code, 'login', session_hash=crypto.digest('session', token))
+        if not outcome:
+            raise HTTPException(400, 'Код неверен, истёк или не подтверждён. Можно войти по email')
+        if isinstance(outcome, tuple):
+            import account_mfa
+            challenge, email_code = outcome
+            try:
+                with job_store.connect() as db:
+                    row = db.execute('SELECT u.email FROM privetek_users u JOIN privetek_mfa_challenges c ON c.user_id=u.id WHERE c.token_hash=%s',
+                                     (crypto.digest('mfa-login', challenge),)).fetchone()
+                quota(request, row['email'], 'mfa-email-send', 5)
+                email_sender.send_account_code(row['email'], email_code, 'mfa')
+            except HTTPException:
+                account_mfa.cancel_login(challenge)
+                raise
+            except Exception:
+                account_mfa.cancel_login(challenge)
+                raise HTTPException(503, 'Не удалось отправить второй фактор. Войдите по email') from None
+            return result(dict(mfa_required=True, method='email', challenge_id=challenge, expires_in=300))
+        if isinstance(outcome, str):
+            return result(dict(mfa_required=True, challenge_id=outcome, expires_in=300))
+        return session_response(request, token)
     if name in ('register', 'forgot-password'):
         return issue(data, request, 'register' if name == 'register' else 'reset')
     if name in ('verify', 'reset-password'):
@@ -199,6 +250,65 @@ async def auth(name: str, request: Request):
         raise
     except Exception:
         raise HTTPException(503, 'Сервис временно недоступен. Попробуйте позже') from None
+
+
+@router.get('/api/account/auth/capabilities')
+def auth_capabilities():
+    import sms_provider
+    ready()
+    return result(dict(sms_login=sms_provider.configured()))
+
+
+@router.get('/api/account/phone')
+def phone_status(request: Request):
+    import phone_auth
+    import sms_provider
+    ready()
+    user, _ = identify(request)
+    if not sms_provider.configured():
+        return result(dict(available=False, linked=False, masked_phone=None))
+    return result(dict(available=True, **phone_auth.status(user['id'])))
+
+
+@router.post('/api/account/phone/{action}')
+async def phone_manage(action: str, request: Request):
+    import phone_auth
+    import sms_provider
+    ready()
+    origin(request)
+    user, _ = identify(request, mutation=True)
+    if not sms_provider.configured():
+        raise HTTPException(404, 'SMS пока не подключены')
+    data = await body(request)
+    def execute():
+        quota(request, user['email'], 'sms-manage', 5)
+        if action == 'verify':
+            if not phone_auth.redeem(data.get('challenge_id'), data.get('code'), 'bind', user_id=user['id']):
+                raise HTTPException(400, 'Код неверен или истёк')
+            return result(dict(message='Телефон подтверждён'))
+        with job_store.connect() as db:
+            row = db.execute('SELECT password_hash FROM privetek_users WHERE id=%s', (user['id'],)).fetchone()
+        if not row or not crypto.password_matches(row['password_hash'], data.get('password')):
+            raise HTTPException(400, 'Проверьте пароль')
+        if action == 'start' and data.get('consent') is True:
+            try:
+                challenge = phone_auth.issue(data.get('phone'), 'bind', user['id'])
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from None
+            return result(dict(challenge_id=challenge, message='Если номер доступен для пилота, код придёт по SMS.'))
+        if action == 'delete':
+            with job_store.connect() as db:
+                db.execute('SELECT id FROM privetek_users WHERE id=%s FOR UPDATE', (user['id'],))
+                db.execute('DELETE FROM privetek_account_phones WHERE user_id=%s', (user['id'],))
+                db.execute('DELETE FROM privetek_phone_codes WHERE user_id=%s', (user['id'],))
+            return result(dict(message='Телефон отвязан. Вход по email сохранён'))
+        raise HTTPException(422, 'Подтвердите согласие и выберите действие')
+    try:
+        return await run_in_threadpool(execute)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(503, 'Не удалось выполнить действие с телефоном') from None
 
 
 @router.get('/api/account/me')
@@ -427,7 +537,7 @@ def page():
 
 @router.get('/account/assets/{name}', include_in_schema=False)
 def asset(name: str):
-    allowed = {'subscription-core.js':'application/javascript', 'subscriptions.js':'application/javascript', 'account-profile.js':'application/javascript', 'account-nav.js':'application/javascript', 'report-chat.js':'application/javascript', 'start.js':'application/javascript', 'landing-handoff.js':'application/javascript', 'account.css': 'text/css', 'account.js': 'application/javascript',
+    allowed = {'phone-auth.js':'application/javascript', 'subscription-core.js':'application/javascript', 'subscriptions.js':'application/javascript', 'account-profile.js':'application/javascript', 'account-nav.js':'application/javascript', 'report-chat.js':'application/javascript', 'start.js':'application/javascript', 'landing-handoff.js':'application/javascript', 'account.css': 'text/css', 'account.js': 'application/javascript',
                'brand-logo.png': 'image/png', 'brand-background.jpg': 'image/jpeg',
                'tildasans.woff2': 'font/woff2'}
     if name not in allowed:

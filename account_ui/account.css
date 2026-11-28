@@ -574,3 +574,5 @@ body.account-ready {
 #account-panel-subscriptions .small,#account-panel-subscriptions .muted{color:#aebfd5}
 #account-panel-subscriptions .button.secondary{background:#1d314a;color:#e7f2ff;border:1px solid #58718f}
 #account-panel-subscriptions .button:disabled{opacity:.55}
+
+#phone-manage{background:#101e30;color:#d8e6f8;border:1px solid #344961;border-radius:20px;margin-bottom:24px}#phone-manage .security-content{padding:24px}#phone-login{margin:18px 0}#phone-login summary,#phone-manage summary{cursor:pointer;padding:12px 0}#phone-login form,#phone-manage form{margin:16px 0}#phone-login input,#phone-manage input{max-width:100%}

@@ -18,6 +18,7 @@ FIELDS={'Name':'Synthetic Person','Email':'owner@example.com','Phone':'+1 (202) 
 def test_pages_and_cross_origin_rejection(settings,monkeypatch):
     c=client();quota=MagicMock();monkeypatch.setattr(account_store,'quota',quota)
     for path in ['/account/login','/account/register','/account/start']:assert c.get(path).status_code==200
+    assert 'Для запуска отчёта номер обязателен' in c.get('/account/start').text
     assert c.post('/account/start',data=FIELDS,headers={'Origin':'https://evil.test'}).status_code==403
     quota.assert_not_called()
     assert c.post('/account/start',json=FIELDS).status_code==415

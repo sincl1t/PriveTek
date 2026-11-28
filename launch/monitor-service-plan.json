@@ -1,0 +1,15 @@
+{
+  "state": "PREPARED_ONLY_DO_NOT_CREATE_BEFORE_APPROVAL",
+  "workspace_id": "tea-darskrfavr4c7381gqu0",
+  "type": "cron_job",
+  "name": "privetek-monitor-pilot",
+  "repo": "https://github.com/sincl1t/PriveTek",
+  "branch": "main",
+  "schedule_utc": "0 3 * * *",
+  "build_command": "python -m py_compile tools/run_monitor.py",
+  "command": "python tools/run_monitor.py",
+  "environment_keys_only": ["MONITOR_RUNNER_TOKEN"],
+  "max_process_seconds": 600,
+  "preflight_command": "python tools/run_monitor.py --check",
+  "note": "Paid resource: create only after budget and activation approval. No database, email, SMS or HIBP secrets on cron."
+}

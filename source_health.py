@@ -19,7 +19,7 @@ def registry():
                    limitation='Точный публичный username; личность не подтверждена. Ошибка не означает отсутствие аккаунта.') for s in SOURCES + discovery.SOURCES]
     return dict(discovery_probe=discovery.latest_probe(), sources=public + [
         dict(name='LeakCheck', kind='breach', source_url='https://leakcheck.io/', docs='https://docs.leakcheck.io/public-api/lookup', enabled=True, credential_required=False, limitation='Хеш email; только метаданные. Категории общие для всех утечек. 1 запрос/секунду.'),
-        dict(name='HIBP', kind='breach', source_url='https://haveibeenpwned.com/', enabled=bool(os.getenv('HIBP_API_KEY')), credential_required=True, limitation='Без платного ключа пропущен; полнота базы не гарантируется.'),
+        dict(name='HIBP', kind='breach', source_url='https://haveibeenpwned.com/', enabled=bool(os.getenv('HIBP_API_KEY','').strip()) and os.getenv('HIBP_ENABLED','').lower()!='false', credential_required=True, limitation='Без платного ключа пропущен; полнота базы не гарантируется.'),
         dict(name='Gravatar', kind='avatar', source_url='https://gravatar.com/', enabled=True, credential_required=False, limitation='Публичный аватар по хешу email, не подтверждает регистрацию на других сайтах.'),
         *[dict(name=n, kind='email/phone' if n == 'Amazon' else 'email', enabled=True, credential_required=False, limitation='Косвенные признаки регистрации. Лимиты и изменение страницы делают проверку недоступной.') for n in ('Amazon', 'Instagram', 'Spotify')],
     ], probe_cache_seconds=300, probe_scope='Известные публичные профили и синтетический email; не проверяет все возможные usernames или закрытые аккаунты.')
