@@ -129,8 +129,9 @@ def submit(user_id, username):
     payload = None
     try:
         results = asyncio.run(asyncio.wait_for(search(username), timeout=25))
-        if not any(item['status'] in ('found', 'not_found') for item in results):
+        if not results:
             raise HTTPException(503, 'Источники не дали ответа. Можно попробовать снова.')
+        definitive = any(item['status'] in ('found', 'not_found') for item in results)
         payload = account_crypto.report_cipher().encrypt(json.dumps(results, ensure_ascii=False).encode())
     finally:
         with job_store.connect() as db:
@@ -138,10 +139,10 @@ def submit(user_id, username):
                 db.execute('UPDATE privetek_profile_search SET lease_token=NULL,lease_until=NULL WHERE user_id=%s AND lease_token=%s',
                            (user_id, token))
             else:
-                saved = db.execute('''UPDATE privetek_profile_search SET free_used=true, lease_token=NULL,
+                saved = db.execute('''UPDATE privetek_profile_search SET free_used=free_used OR %s, lease_token=NULL,
                     lease_until=NULL, ciphertext=%s, result_until=now()+interval '24 hours'
                     WHERE user_id=%s AND lease_token=%s AND lease_until>now() RETURNING user_id''',
-                                   (payload, user_id, token)).fetchone()
+                                   (definitive, payload, user_id, token)).fetchone()
                 if not saved:
                     raise HTTPException(409, 'Срок запроса истёк. Попробуйте снова.')
     return state(user_id)

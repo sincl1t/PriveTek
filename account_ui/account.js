@@ -234,23 +234,37 @@ function renderProfileSearch(state) {
   $('profile-search-submit').disabled = state.busy;
 }
 function showProfileResults(results, bubble, previous = false) {
-  const reply = profileBubble(previous ? 'Последний сохранённый результат.' : 'Поиск завершён.', 'bot', bubble);
-  const found = results.filter(row => row.status === 'found');
-  reply.append(textEl('p', 'small', 'Найдено профилей: ' + found.length + ' · Источников в ответе: ' + results.length));
-  const items = textEl('ul', 'profile-chat-results', '');
+  const counts = {found: 0, not_found: 0, unavailable: 0, skipped: 0};
+  const found = textEl('ul', 'profile-chat-results', '');
+  const other = textEl('ul', 'profile-chat-results', '');
   const labels = {found: 'Найден профиль', not_found: 'Совпадений не найдено', unavailable: 'Проверка недоступна', skipped: 'Формат имени не подходит'};
-  for (const row of [...found, ...results.filter(row => row.status !== 'found')]) {
+  for (const row of results) {
+    counts[row.status]++;
     const item = textEl('li', '', row.site + ' — ' + labels[row.status]);
-    if (row.url) {
+    if (row.status === 'found' && row.url) {
       const link = textEl('a', '', 'Открыть профиль ↗');
       link.href = row.url;
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       item.append(' ', link);
     }
-    items.append(item);
+    (row.status === 'found' ? found : other).append(item);
   }
-  reply.append(items, textEl('p', 'small', 'Совпадение username не подтверждает владельца профиля.'));
+  let heading = previous ? 'Последний сохранённый результат.' : 'Поиск завершён.';
+  if (!counts.found) {
+    heading = counts.not_found
+      ? 'Совпадений не найдено среди успешно выполненных проверок.'
+      : 'Не удалось завершить проверки.';
+  }
+  const reply = profileBubble(heading, 'bot', bubble);
+  reply.append(textEl('p', 'small', `Найдено: ${counts.found} · Проверено без находок: ${counts.not_found} · Недоступно: ${counts.unavailable} · Пропущено: ${counts.skipped}`));
+  if (counts.found) reply.append(found);
+  if (results.length > counts.found) {
+    const details = textEl('details', 'profile-chat-details', '');
+    details.append(textEl('summary', '', 'Подробнее по источникам'), other);
+    reply.append(details);
+  }
+  if (counts.found) reply.append(textEl('p', 'small', 'Совпадение username не подтверждает владельца профиля.'));
   const log = $('profile-search-log');
   log.scrollTop = log.scrollHeight;
 }
