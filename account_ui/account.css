@@ -223,6 +223,7 @@ body.dialog-open { overflow: hidden; }
   padding: 1rem;
 }
 .profile-chat-bubble {
+  --profile-chat-list-indent: 1.1rem;
   align-self: flex-start;
   background: rgba(111, 105, 205, .12);
   border-radius: .9rem .9rem .9rem .25rem;
@@ -237,10 +238,19 @@ body.dialog-open { overflow: hidden; }
 }
 .profile-chat-author { font-size: .78rem; font-weight: 700; margin-bottom: .25rem; }
 .profile-chat-bubble p { margin: 0; }
-.profile-chat-results { margin: .5rem 0; padding-inline-start: 1.1rem; }
+.profile-chat-results { margin: .5rem 0; padding-inline-start: var(--profile-chat-list-indent); }
 .profile-chat-results li + li { margin-top: .4rem; }
 .profile-chat-details { margin-block: .5rem; }
-.profile-chat-details > summary { cursor: pointer; }
+.profile-chat-details > summary {
+  width: fit-content;
+  margin-inline-start: var(--profile-chat-list-indent);
+  list-style-position: outside;
+  color: var(--accent);
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: .18em;
+  cursor: pointer;
+}
 .profile-chat-form { padding: 0 1rem 1rem; }
 .profile-chat-compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .4rem .65rem; align-items: stretch; }
 .profile-chat-label { grid-column: 1 / -1; }
