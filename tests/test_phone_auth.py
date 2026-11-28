@@ -106,3 +106,65 @@ def test_binding_challenge_cannot_be_used_by_another_account(db,monkeypatch):
     challenge=phone.issue('+12025550123','bind',user);code=sent[-1][1]
     assert not phone.redeem(challenge,code,'bind',user_id='another-user')
     assert phone.redeem(challenge,code,'bind',user_id=user)
+
+
+
+def prepare_sms_mfa(db, monkeypatch, method):
+    """Synthetic linked account; provider sends remain mocked by enable/db."""
+    import account_mfa
+    import pyotp
+    c=client();register(c,db);sent=enable(monkeypatch)
+    with job_store.connect() as conn:
+        conn.execute('TRUNCATE privetek_sms_budget')
+        user=conn.execute('SELECT id FROM privetek_users').fetchone()['id']
+    challenge=phone.issue('+12025550123','bind',user)
+    assert phone.redeem(challenge,sent[-1][1],'bind',user_id=user)
+    secret=pyotp.random_base32() if method=='totp' else None
+    ciphertext=account_mfa.cipher().encrypt(secret.encode()) if secret else None
+    with job_store.connect() as conn:
+        conn.execute('UPDATE privetek_users SET mfa_enabled=TRUE,mfa_secret=%s WHERE id=%s',(ciphertext,user))
+    return c,sent,secret
+
+
+@pytest.mark.parametrize('method',['email','totp'])
+def test_http_sms_login_requires_existing_second_factor(db,monkeypatch,method):
+    import pyotp
+    c,sent,secret=prepare_sms_mfa(db,monkeypatch,method)
+    email_count=len(db)
+    started=c.post('/api/account/auth/sms-start',json={'phone':'+12025550123'})
+    assert started.status_code==200,started.text
+    otp=sent[-1][1]
+    response=c.post('/api/account/auth/sms-verify',json={'challenge_id':started.json()['challenge_id'],'code':otp})
+    assert response.status_code==200,response.text
+    assert response.json()['mfa_required'] is True and 'set-cookie' not in response.headers
+    assert c.get('/api/account/me').status_code==401
+    with job_store.connect() as conn:
+        assert conn.execute('SELECT count(*) AS n FROM privetek_sessions').fetchone()['n']==0
+    if method=='email':
+        assert response.json()['method']=='email' and len(db)==email_count+1
+        email,factor,purpose=db[-1]
+        assert email=='owner@example.com' and purpose=='mfa'
+    else:
+        assert response.json().get('method')!='email' and len(db)==email_count
+        factor=pyotp.TOTP(secret).now()
+    challenge=response.json()['challenge_id']
+    assert c.post('/api/account/auth/mfa-verify',json={'challenge_id':challenge,'code':'invalid'}).status_code==400
+    finished=c.post('/api/account/auth/mfa-verify',json={'challenge_id':challenge,'code':factor})
+    assert finished.status_code==200 and 'set-cookie' in finished.headers
+    assert c.get('/api/account/me').json()['email']=='owner@example.com'
+    assert c.post('/api/account/auth/mfa-verify',json={'challenge_id':challenge,'code':factor}).status_code==400
+
+
+def test_sms_email_mfa_quota_failure_cancels_challenge_without_session(db,monkeypatch):
+    c,sent,_=prepare_sms_mfa(db,monkeypatch,'email')
+    started=c.post('/api/account/auth/sms-start',json={'phone':'+12025550123'})
+    assert started.status_code==200,started.text
+    for _ in range(5):
+        assert account_store.quota([('mfa-email-send:email','owner@example.com',5)])
+    email_count=len(db)
+    response=c.post('/api/account/auth/sms-verify',json={'challenge_id':started.json()['challenge_id'],'code':sent[-1][1]})
+    assert response.status_code==429 and 'set-cookie' not in response.headers
+    assert len(db)==email_count and c.get('/api/account/me').status_code==401
+    with job_store.connect() as conn:
+        assert conn.execute('SELECT count(*) AS n FROM privetek_sessions').fetchone()['n']==0
+        assert conn.execute('SELECT count(*) AS n FROM privetek_mfa_challenges').fetchone()['n']==0

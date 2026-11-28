@@ -164,7 +164,11 @@ def action(data, request, name):
                 with job_store.connect() as db:
                     row = db.execute('SELECT u.email FROM privetek_users u JOIN privetek_mfa_challenges c ON c.user_id=u.id WHERE c.token_hash=%s',
                                      (crypto.digest('mfa-login', challenge),)).fetchone()
+                quota(request, row['email'], 'mfa-email-send', 5)
                 email_sender.send_account_code(row['email'], email_code, 'mfa')
+            except HTTPException:
+                account_mfa.cancel_login(challenge)
+                raise
             except Exception:
                 account_mfa.cancel_login(challenge)
                 raise HTTPException(503, 'Не удалось отправить второй фактор. Войдите по email') from None

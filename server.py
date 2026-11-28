@@ -267,11 +267,11 @@ def background_task(submission, job_id):
         job_store.record(job_id, 'generating_report')
         pdf_path = pdf_gen.create_report(results)
         if account_crypto.enabled():
-            try:
-                import account_store
-                account_store.save_report(job_id, pdf_path, results.get('identity_resolution'))
-            except Exception as error:
-                logger.error('job=%s account_report_failed=%s', job_id, type(error).__name__)
+            # An account order is complete only when its PDF is safely available in the account.
+            # Do not email a report and claim success after failing to persist its account copy.
+            stage = 'archive'
+            import account_store
+            account_store.save_report(job_id, pdf_path, results.get('identity_resolution'))
         stage = 'mail'
         job_store.record(job_id, 'sending')
         email_sender.send_report(str(submission.Email), pdf_path)
@@ -292,6 +292,29 @@ def background_task(submission, job_id):
                 logger.error('job=%s report_cleanup_failed', job_id)
         guard.finish(job_id)
         slots.release()
+
+
+@app.get('/api/account/jobs/{job_id}/status')
+async def account_job_status(job_id: str, request: Request):
+    from account_routes import ready, identify, result
+    ready()
+    user, _ = await run_in_threadpool(identify, request)
+    if not re.fullmatch(r'[0-9a-f]{32}', job_id):
+        raise HTTPException(404, 'Заявка не найдена')
+    def read_status():
+        with job_store.connect() as db:
+            return db.execute('''SELECT j.status,
+                (r.job_id IS NOT NULL AND r.expires_at > CURRENT_TIMESTAMP) AS report_available
+                FROM privetek_jobs j JOIN privetek_job_owners o ON o.job_id=j.id
+                LEFT JOIN privetek_account_reports r ON r.job_id=j.id
+                WHERE j.id=%s AND o.email_key=%s''', (job_id, user['email_key'])).fetchone()
+    try:
+        row = await run_in_threadpool(read_status)
+    except Exception:
+        raise HTTPException(503, 'Не удалось узнать статус заявки. Попробуйте позже') from None
+    if not row:
+        raise HTTPException(404, 'Заявка не найдена')
+    return result(row)
 
 
 @app.post('/api/account/jobs')

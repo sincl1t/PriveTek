@@ -79,3 +79,11 @@ def test_pilot_window_is_read_only_by_default_and_refuses_active_monitoring(db,m
     assert window.run(days=7,apply=True)['applied']
     monkeypatch.setenv('MONITOR_ENABLED','true')
     with pytest.raises(ValueError):window.run(apply=True)
+
+
+@pytest.mark.parametrize('key,flag,expected',[('stored-key','false',False),('stored-key','true',True),('stored-key','',True),('','true',False)])
+def test_hibp_registry_matches_effective_switch(monkeypatch,key,flag,expected):
+    import source_health
+    monkeypatch.setenv('HIBP_API_KEY',key);monkeypatch.setenv('HIBP_ENABLED',flag)
+    source=next(s for s in source_health.registry()['sources'] if s['name']=='HIBP')
+    assert source['enabled'] is expected

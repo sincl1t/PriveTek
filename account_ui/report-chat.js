@@ -89,6 +89,21 @@
     }
   }
 
+  function unavailableResult(text, job = {}) {
+    step = 'unavailable';
+    form.hidden = true;
+    options.textContent = '';
+    const reply = bubble(text);
+    if (job.report_available) {
+      const pdf = textEl('a', 'button secondary', 'Скачать сохранённый PDF');
+      pdf.href = '/api/account/jobs/' + jobId + '/report';
+      pdf.download = 'PriveTek-report.pdf';
+      reply.append(pdf);
+    }
+    button('Открыть историю', () => openAccountTab('reports', true));
+    button('Подготовить новую проверку', reset);
+  }
+
   async function poll(ticket) {
     if (ticket !== revision || $('dashboard').hidden) return;
     options.textContent = '';
@@ -103,6 +118,29 @@
       if (error.status === 401) {
         signedOut('Сессия завершилась. Войдите снова.');
         return;
+      }
+      if (error.status === 404) {
+        try {
+          const job = await api('jobs/' + jobId + '/status');
+          if (ticket !== revision) return;
+          if (job.status === 'failed') {
+            unavailableResult('Не удалось подготовить или сохранить отчёт. Автоматически повторно проверку не запускаем. Посмотрите историю; при необходимости подготовьте новую проверку.', job);
+            return;
+          }
+          if (job.status === 'delivery_unknown') {
+            unavailableResult('Результат отправки письма не подтверждён. Автоматически повторно письмо не отправляем. Проверьте почту и историю; сохранённый PDF можно скачать, если он доступен.', job);
+            return;
+          }
+          if (job.status === 'provider_accepted') {
+            unavailableResult('Подробный разбор пока недоступен. Почтовый сервис принял письмо, но получение адресатом не подтверждено. Откройте историю или сохранённый PDF, если он доступен.', job);
+            return;
+          }
+        } catch (statusError) {
+          if (ticket !== revision) return;
+          if (statusError.status === 401) { signedOut('Сессия завершилась. Войдите снова.'); return; }
+          if (statusError.status === 404) { unavailableResult('Заявка не найдена. Откройте историю перед новым запуском.'); return; }
+          // A temporary status error is not proof of failure or absence; keep bounded polling.
+        }
       }
       if (error.status === 404 && ++attempts < 40) {
         timer = setTimeout(() => poll(ticket), 3000);
